@@ -606,7 +606,8 @@ void dispatch(void* packed_recv_x,
   int sm_count;
   cudaDeviceGetAttribute(&sm_count, cudaDevAttrMultiProcessorCount, dev_id);
   const int num_warp_groups = cell_div(num_experts, sm_count);
-  const auto num_sms = max(sm_count, cell_div(num_experts, num_warp_groups));
+  // const auto num_sms = max(sm_count, cell_div(num_experts, num_warp_groups));
+  const auto num_sms = cell_div(num_experts, num_warp_groups);
   EP_HOST_ASSERT(num_topk <= kNumMaxTopK);
   const int num_rdma_ranks = num_ranks / NUM_MAX_NVL_PEERS;
   const int num_rdma_experts = num_experts / num_rdma_ranks;
@@ -1090,7 +1091,8 @@ void combine(void* combined_x,
   int sm_count;
   cudaDeviceGetAttribute(&sm_count, cudaDevAttrMultiProcessorCount, dev_id);
   const int num_warp_groups = cell_div(num_experts, sm_count);
-  const auto num_sms = max(sm_count, cell_div(num_experts, num_warp_groups));
+  // const auto num_sms = max(sm_count, cell_div(num_experts, num_warp_groups));
+  const auto num_sms = cell_div(num_experts, num_warp_groups);
   const int num_rdma_ranks = num_ranks / NUM_MAX_NVL_PEERS;
 
   // Check workspace
