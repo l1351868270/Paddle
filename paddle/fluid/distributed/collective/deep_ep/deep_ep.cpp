@@ -2068,11 +2068,24 @@ Buffer::low_latency_dispatch_two_stage(
         launch_stream,
         phases);
   };
+
   // TODO(Zhenyu Li): supports async/return_recv_hook
-  launcher((LOW_LATENCY_SEND_PHASE | LOW_LATENCY_RECV_PHASE));
+  launcher(return_recv_hook
+            ? LOW_LATENCY_SEND_PHASE
+            : (LOW_LATENCY_SEND_PHASE | LOW_LATENCY_RECV_PHASE));
+
   // Wait streams
   std::optional<EventHandle> event;
+  // if (async) {
+  //   event = EventHandle(launch_stream);
+  // } else if (!return_recv_hook) {
+  //   stream_wait(compute_stream, launch_stream);
+  // }
+
+  // Receiver callback
   std::optional<std::function<void()>> recv_hook = std::nullopt;
+  if (return_recv_hook) recv_hook = [=]() { launcher(LOW_LATENCY_RECV_PHASE); }; 
+
   return {packed_recv_x,
           packed_recv_x_scales,
           packed_recv_count,
@@ -2188,11 +2201,22 @@ Buffer::low_latency_combine_two_stage(
         dispatch_use_fp8);
   };
   // TODO(Zhenyu Li): supports async/return_recv_hook
-  launcher((LOW_LATENCY_SEND_PHASE | LOW_LATENCY_RECV_PHASE));
+  launcher(return_recv_hook
+              ? LOW_LATENCY_SEND_PHASE
+              : (LOW_LATENCY_SEND_PHASE | LOW_LATENCY_RECV_PHASE));
+
   // Wait streams
   std::optional<EventHandle> event;
+  // if (async) {
+  //   event = EventHandle(launch_stream);
+  // } else if (!return_recv_hook) {
+  //   stream_wait(compute_stream, launch_stream);
+  // }
+
   // Receiver callback
   std::optional<std::function<void()>> recv_hook = std::nullopt;
+  if (return_recv_hook) recv_hook = [=]() { launcher(LOW_LATENCY_RECV_PHASE); };
+
   // Return values
   return {combined_x, event, recv_hook};
 }
