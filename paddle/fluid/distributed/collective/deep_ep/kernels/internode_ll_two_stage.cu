@@ -127,6 +127,9 @@ __global__ __launch_bounds__(
       num_bytes_per_msg_rdma_revecier_and_nvl_sender % sizeof(int4) == 0);
   EP_DEVICE_ASSERT(num_bytes_per_msg_rdma_to_nvl % sizeof(int4) == 0);
 
+  if ((phases & LOW_LATENCY_SEND_PHASE) == 0)
+    goto LOW_LATENCY_DISPATCH_RECV;
+
   /* RDMA Sender */
   {
     constexpr int kNumElemsPerRead = sizeof(int4) / sizeof(nv_bfloat16);
@@ -326,6 +329,10 @@ __global__ __launch_bounds__(
       atomic_counter_per_expert[i] = 0;
     }
   }
+
+  LOW_LATENCY_DISPATCH_RECV:
+  if ((phases & LOW_LATENCY_RECV_PHASE) == 0) 
+    return;
 
   /* RDMA Receiver and NVL Sender */
   {
@@ -599,7 +606,8 @@ void dispatch(void* packed_recv_x,
   int sm_count;
   cudaDeviceGetAttribute(&sm_count, cudaDevAttrMultiProcessorCount, dev_id);
   const int num_warp_groups = cell_div(num_experts, sm_count);
-  const auto num_sms = max(sm_count, cell_div(num_experts, num_warp_groups));
+  // const auto num_sms = max(sm_count, cell_div(num_experts, num_warp_groups));
+  const auto num_sms = cell_div(num_experts, num_warp_groups);
   EP_HOST_ASSERT(num_topk <= kNumMaxTopK);
   const int num_rdma_ranks = num_ranks / NUM_MAX_NVL_PEERS;
   const int num_rdma_experts = num_experts / num_rdma_ranks;
@@ -779,6 +787,9 @@ __global__ __launch_bounds__(
   const size_t NVL_BUFFER_X_BYTES =
       DISPATCH_NVL_BUFFER_X_BYTES + COMBINE_NVL_BUFFER_X_BYTES;
 
+  if ((phases & LOW_LATENCY_SEND_PHASE) == 0)
+      goto LOW_LATENCY_COMBINE_RECV;
+
   /* NVL Sender */
   if (responsible_expert_idx < num_experts) {
     const auto dst_rank = responsible_expert_idx / num_local_experts;
@@ -840,6 +851,10 @@ __global__ __launch_bounds__(
     }
     __syncwarp();
   }
+
+  LOW_LATENCY_COMBINE_RECV:
+  if ((phases & LOW_LATENCY_RECV_PHASE) == 0)
+      return;
 
   // Wait all nvl ranks to arrive
   if (responsible_expert_idx < num_experts) {
@@ -1076,7 +1091,8 @@ void combine(void* combined_x,
   int sm_count;
   cudaDeviceGetAttribute(&sm_count, cudaDevAttrMultiProcessorCount, dev_id);
   const int num_warp_groups = cell_div(num_experts, sm_count);
-  const auto num_sms = max(sm_count, cell_div(num_experts, num_warp_groups));
+  // const auto num_sms = max(sm_count, cell_div(num_experts, num_warp_groups));
+  const auto num_sms = cell_div(num_experts, num_warp_groups);
   const int num_rdma_ranks = num_ranks / NUM_MAX_NVL_PEERS;
 
   // Check workspace
