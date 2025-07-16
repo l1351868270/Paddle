@@ -187,9 +187,8 @@ def test_main(
     print("num_experts: ", num_experts)
 
     a_start_rank = 0
-    a_num_ranks = 8
+    a_num_ranks = 16
     e_start_rank = a_start_rank + a_num_ranks
-    e_num_ranks = 8
     if rank >= a_start_rank and rank < a_start_rank + a_num_ranks:
         # # a2e_isend
         # (
@@ -268,13 +267,14 @@ def test_main(
                 use_fp8=use_fp8,
             )
 
-            req.wait()
+            # event.current_stream_wait()
+            # req.wait()
 
         avg_t, min_t, max_t = bench_m2n(a2e_isend_func)
         print(f'[rank: {rank}][a2e_isend_two_stage] '
               f'avg_t: {avg_t * 1e6:.2f} us, min_t: {min_t * 1e6:.2f} us, max_t: {max_t * 1e6:.2f} us', flush=True)
         
-    if rank >= e_start_rank and rank < e_start_rank + e_num_ranks:
+    if rank >= e_start_rank:
         # x = paddle.empty(
         #     (0, hidden), 
         #     dtype="bfloat16"
@@ -377,6 +377,7 @@ def test_main(
                 num_experts,
                 use_fp8=use_fp8,
             )
+            # event.current_stream_wait()
             req.wait()
 
         avg_t, min_t, max_t = bench_m2n(a2e_irecv_func)
@@ -394,7 +395,7 @@ def test_loop():
     print("rank: ", rank, flush=True)
     print("num_ranks: ", num_ranks, flush=True)
 
-    num_tokens, hidden, num_topk, num_experts = 128, 8192, 8, 64
+    num_tokens, hidden, num_topk, num_experts = 96, 8192, 8, 72
     assert (
         num_tokens <= num_max_tokens
     ), "num_tokens must be less equal to num_max_tokens"
