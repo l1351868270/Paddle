@@ -39,6 +39,18 @@ from paddle.base.core import EventHandle
 from .utils import EventOverlap
 
 
+class M2NWorker:
+    """
+    M2NWork manage asynchronous events
+    """
+    def __init__(self, hook: Callable = None) -> None:
+        self.hook = hook 
+
+    def wait(self):
+        if self.hook is not None:
+            self.hook()
+
+
 class Buffer:
     """
     The core expert-parallel (EP) communication buffers for Mixture of Experts (MoE) model, which supports:
@@ -1177,4 +1189,160 @@ class Buffer:
             combined_x,
             EventOverlap(event, tensors_to_record if async_finish else None),
             hook,
+        )
+
+    def a2e_isend_two_stage(
+        self,
+        x: paddle.Tensor,
+        topk_idx: paddle.Tensor,
+        topk_weights: paddle.Tensor,
+        num_max_dispatch_tokens_per_rank: int,
+        num_experts: int,
+        use_fp8: bool = True,
+    ) -> tuple[
+        tuple[paddle.Tensor, paddle.Tensor],
+        tuple,
+        EventOverlap,
+        M2NWorker,
+    ]:
+        (
+            packed_recv_x,
+            _,
+            _,
+            handle,
+            event,
+            hook,
+        ) = self.low_latency_dispatch_two_stage(
+            x,
+            topk_idx,
+            topk_weights,
+            num_max_dispatch_tokens_per_rank,
+            num_experts,
+            use_fp8,
+            async_finish = False,
+            return_recv_hook = True,
+        )
+
+        return (
+            packed_recv_x,
+            handle,
+            event,
+            M2NWorker(hook),
+        ) 
+
+    def a2e_irecv_two_stage(
+        self,
+        hidden: int,
+        num_topk: int,
+        num_max_dispatch_tokens_per_rank: int,
+        num_experts: int,
+        use_fp8: bool = True,
+    ) -> tuple[
+        tuple[paddle.Tensor, paddle.Tensor],
+        paddle.Tensor,
+        tuple,
+        EventOverlap,
+        M2NWorker,
+    ]:
+        x = paddle.empty(
+            (0, hidden), 
+            dtype="bfloat16"
+        )
+
+        topk_idx = paddle.empty(
+            (0, num_topk),
+            dtype='int64',
+        )
+
+        topk_weights = paddle.empty(
+            (0, num_topk), 
+            dtype="float32",
+        )
+
+        (
+            packed_recv_x,
+            packed_recv_count,
+            rdma_send_flags,
+            handle,
+            event,
+            hook,
+        ) = self.low_latency_dispatch_two_stage(
+            x,
+            topk_idx,
+            topk_weights,
+            num_max_dispatch_tokens_per_rank,
+            num_experts,
+            use_fp8,
+            async_finish = True,
+            return_recv_hook = False,
+        )
+
+        return (
+            packed_recv_x,
+            packed_recv_count,
+            rdma_send_flags,
+            handle,
+            event,
+            M2NWorker(hook),
+        ) 
+
+    def e2a_isend_two_stage(
+        self,
+        x: paddle.Tensor,
+        num_topk: int,
+        handle: tuple,
+        dispatch_use_fp8: bool = False,
+        out: paddle.Tensor | None = None,
+    ) -> tuple[EventOverlap, M2NWorker]:
+        topk_idx = paddle.empty(
+            (0, num_topk),
+            dtype='int64',
+        )
+
+        topk_weights = paddle.empty(
+            (0, num_topk), 
+            dtype="float32",
+        )
+
+        _, event, hook = self.low_latency_combine_two_stage(
+            x,
+            topk_idx,
+            topk_weights,
+            handle,
+            async_finish=False,
+            dispatch_use_fp8=dispatch_use_fp8,
+            return_recv_hook=True,
+            out=out,
+        )
+
+        return (
+            event, 
+            M2NWorker(hook),
+        )
+
+
+    def e2a_irecv_two_stage(
+        self,
+        x: paddle.Tensor,
+        topk_idx: paddle.Tensor,
+        topk_weights: paddle.Tensor,
+        handle: tuple,
+        dispatch_use_fp8: bool = False,
+        out: paddle.Tensor | None = None,
+    ) -> tuple[paddle.Tensor, EventOverlap, M2NWorker]:
+        combined_x, event, hook = self.low_latency_combine_two_stage(
+            x,
+            topk_idx,
+            topk_weights,
+            handle,
+            async_finish=False,
+            dispatch_use_fp8=dispatch_use_fp8,
+            return_recv_hook=True,
+            out=out,
+        )
+
+        return (
+            combined_x,
+            event,
+            M2NWorker(hook),
         )
