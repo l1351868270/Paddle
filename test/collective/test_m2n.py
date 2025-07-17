@@ -142,6 +142,10 @@ def test_main(
     use_fp8: bool,
     rank: int,
     num_ranks: int,
+    a_start_rank: int,
+    a_num_ranks: int,
+    e_start_rank: int,
+    e_num_ranks: int,
     group: dist.communication.group,
     buffer: deep_ep.Buffer,
     seed: int = 0,
@@ -186,9 +190,6 @@ def test_main(
     print("run_time: ", run_time)
     print("num_experts: ", num_experts)
 
-    a_start_rank = 0
-    a_num_ranks = 16
-    e_start_rank = a_start_rank + a_num_ranks
     if rank >= a_start_rank and rank < a_start_rank + a_num_ranks:
         # # a2e_isend
         # (
@@ -274,7 +275,7 @@ def test_main(
         print(f'[rank: {rank}][a2e_isend_two_stage] '
               f'avg_t: {avg_t * 1e6:.2f} us, min_t: {min_t * 1e6:.2f} us, max_t: {max_t * 1e6:.2f} us', flush=True)
         
-    if rank >= e_start_rank:
+    if rank >= e_start_rank and rank < e_start_rank + e_num_ranks:
         # x = paddle.empty(
         #     (0, hidden), 
         #     dtype="bfloat16"
@@ -395,25 +396,36 @@ def test_loop():
     print("rank: ", rank, flush=True)
     print("num_ranks: ", num_ranks, flush=True)
 
-    num_tokens, hidden, num_topk, num_experts = 96, 8192, 8, 72
+    a_start_rank = 0
+    a_num_ranks = 16
+    e_start_rank = a_start_rank + a_num_ranks
+    e_num_ranks = num_ranks - a_num_ranks
+
+    num_tokens, hidden, num_topk, num_experts = 96, 8192, 8, 24
+
     assert (
         num_tokens <= num_max_tokens
     ), "num_tokens must be less equal to num_max_tokens"
     num_rdma_ranks = num_ranks / 8
     num_local_experts = num_experts / num_ranks
-    num_rdma_bytes = deep_ep.Buffer.get_low_latency_rdma_size_hint_two_stage(
-        num_max_tokens, hidden, num_ranks, num_experts, num_topk
+    num_rdma_bytes = deep_ep.M2NBuffer.get_low_latency_rdma_size_hint_two_stage(
+        num_max_tokens, hidden, num_ranks, a_num_ranks, e_num_ranks, num_experts, num_topk
     )
     use_fp8 = True
-    num_nvl_bytes = deep_ep.Buffer.get_low_latency_nvl_size_hint_two_stage(
-        num_max_tokens, hidden, num_ranks, num_experts, num_topk, use_fp8
+    num_nvl_bytes = deep_ep.M2NBuffer.get_low_latency_nvl_size_hint_two_stage(
+        num_max_tokens, hidden, num_ranks, a_num_ranks, e_num_ranks, num_experts, num_topk, use_fp8
     )
     print(
         f'Allocating rdma buffer size: {num_rdma_bytes / 1e6} MB, nvl buffer size: {num_nvl_bytes / 1e6} MB...',
         flush=True,
     )
-    buffer = deep_ep.Buffer(
+
+    buffer = deep_ep.M2NBuffer(
         group,
+        a_start_rank,
+        a_num_ranks,
+        e_start_rank,
+        e_num_ranks,
         num_nvl_bytes=num_nvl_bytes,
         num_rdma_bytes=num_rdma_bytes,
         low_latency_mode=True,
@@ -427,6 +439,10 @@ def test_loop():
         use_fp8,
         rank,
         num_ranks,
+        a_start_rank,
+        a_num_ranks,
+        e_start_rank,
+        e_num_ranks,
         group,
         buffer,
         seed=1,
