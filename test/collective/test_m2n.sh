@@ -15,7 +15,7 @@ for name in `env | grep -E 'PADDLE|ENDPOINT' | awk -F"=" '{print $1}'`; do
 unset ${name}
 done
 
-export LD_LIBRARY_PATH=/workspace/nvshmem/lib:${LD_LIBRARY_PATH}
+export LD_LIBRARY_PATH=/ssd2/lishuliang/nvshmem/lib:${LD_LIBRARY_PATH}
 export NVSHMEM_BOOTSTRAP_UID_SOCK_IFNAME=eth0
 # export IP_LIST="10.94.130.150,10.94.130.151,10.94.130.152"
 export IP_LIST="10.94.130.151,10.94.130.152,10.94.130.153"
@@ -23,7 +23,7 @@ export NCCL_DEBUG=WARN
 
 export devices=0,1,2,3,4,5,6,7
 export started_port=6071
-python -m paddle.distributed.launch \
+python3.10 -m paddle.distributed.launch \
         --gpus ${devices} \
         --ips ${IP_LIST} \
         test_m2n.py

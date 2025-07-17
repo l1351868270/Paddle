@@ -26,15 +26,22 @@ from paddle.distributed.communication import deep_ep
 num_max_tokens = 512
 
 
-def bench_split(fn1, fn2, num_warmups: int = 50, num_tests: int = 50):
+def bench_split(fn1, fn2, fn1_wait: bool = True, fn2_wait: bool = True, num_warmups: int = 50, num_tests: int = 50):
     # clear
     cache = paddle.empty((int(256e6 // 4),), dtype="int32")
     cache.zero_()
 
     # Warmup
     for _ in range(num_warmups):
-        fn1()
-        fn2()
+        dist.barrier()
+        req = fn1()
+        if fn1_wait:
+            req.wait()
+        dist.barrier()
+        req = fn2()
+        if fn2_wait:
+            req.wait()
+        dist.barrier()
 
     # Flush L2
     cache.zero_()
@@ -55,12 +62,19 @@ def bench_split(fn1, fn2, num_warmups: int = 50, num_tests: int = 50):
     ]
     for i in range(num_tests):
         # Record
+        dist.barrier()
         start_events_fn1[i].record()
-        fn1()
+        req = fn1()
         end_events_fn1[i].record()
+        if fn1_wait:
+            req.wait()
+        dist.barrier()
         start_events_fn2[i].record()
-        fn2()
+        req = fn2()
         end_events_fn2[i].record()
+        if fn2_wait:
+            req.wait()
+        dist.barrier()
     paddle.device.synchronize()
 
     times_fn1 = np.array(
@@ -142,6 +156,10 @@ def test_main(
     use_fp8: bool,
     rank: int,
     num_ranks: int,
+    a_start_rank: int,
+    a_num_ranks: int,
+    e_start_rank: int,
+    e_num_ranks: int,
     group: dist.communication.group,
     buffer: deep_ep.Buffer,
     seed: int = 0,
@@ -186,9 +204,6 @@ def test_main(
     print("run_time: ", run_time)
     print("num_experts: ", num_experts)
 
-    a_start_rank = 0
-    a_num_ranks = 16
-    e_start_rank = a_start_rank + a_num_ranks
     if rank >= a_start_rank and rank < a_start_rank + a_num_ranks:
         # # a2e_isend
         # (
@@ -269,12 +284,29 @@ def test_main(
 
             # event.current_stream_wait()
             # req.wait()
+            return req
 
-        avg_t, min_t, max_t = bench_m2n(a2e_isend_func)
+        def e2a_irecv_func():
+            e2a_x, event, req = buffer.e2a_irecv_two_stage(
+                simulated_gemm_x, 
+                topk_idx,
+                topk_weights,
+                handle,
+                dispatch_use_fp8=use_fp8,
+                out=None,
+            )
+            # event.current_stream_wait()
+            req.wait()
+            return req
+
+        avg_t_fn1, min_t_fn1, max_t_fn1, avg_t_fn2, min_t_fn2, max_t_fn2 = bench_split(a2e_isend_func, e2a_irecv_func, fn1_wait=True, fn2_wait=False)
         print(f'[rank: {rank}][a2e_isend_two_stage] '
-              f'avg_t: {avg_t * 1e6:.2f} us, min_t: {min_t * 1e6:.2f} us, max_t: {max_t * 1e6:.2f} us', flush=True)
-        
-    if rank >= e_start_rank:
+              f'avg_t: {avg_t_fn1 * 1e6:.2f} us, min_t: {min_t_fn1 * 1e6:.2f} us, max_t: {max_t_fn1 * 1e6:.2f} us', flush=True)
+        print(f'[rank: {rank}][e2a_irecv_two_stage] '
+              f'avg_t: {avg_t_fn2 * 1e6:.2f} us, min_t: {min_t_fn2 * 1e6:.2f} us, max_t: {max_t_fn2 * 1e6:.2f} us', flush=True)
+
+
+    if rank >= e_start_rank and rank < e_start_rank + e_num_ranks:
         # x = paddle.empty(
         #     (0, hidden), 
         #     dtype="bfloat16"
@@ -379,11 +411,25 @@ def test_main(
             )
             # event.current_stream_wait()
             req.wait()
+            return req
 
-        avg_t, min_t, max_t = bench_m2n(a2e_irecv_func)
+        def e2a_isend_func():
+            event, req = buffer.e2a_isend_two_stage(
+                simulated_gemm_x, 
+                num_topk,
+                handle,
+                dispatch_use_fp8=use_fp8,
+                out=None,
+            )
+            # event.current_stream_wait()
+            # req.wait()
+            return req
+
+        avg_t_fn1, min_t_fn1, max_t_fn1, avg_t_fn2, min_t_fn2, max_t_fn2 = bench_split(a2e_irecv_func, e2a_isend_func, fn1_wait=False, fn2_wait=True)
         print(f'[rank: {rank}][a2e_irecv_two_stage] '
-              f'avg_t: {avg_t * 1e6:.2f} us, min_t: {min_t * 1e6:.2f} us, max_t: {max_t * 1e6:.2f} us', flush=True)
-
+              f'avg_t: {avg_t_fn1 * 1e6:.2f} us, min_t: {min_t_fn1 * 1e6:.2f} us, max_t: {max_t_fn1 * 1e6:.2f} us', flush=True)
+        print(f'[rank: {rank}][e2a_isend_two_stage] '
+              f'avg_t: {avg_t_fn2 * 1e6:.2f} us, min_t: {min_t_fn2 * 1e6:.2f} us, max_t: {max_t_fn2 * 1e6:.2f} us', flush=True)
 
     dist.barrier()
 
@@ -395,25 +441,36 @@ def test_loop():
     print("rank: ", rank, flush=True)
     print("num_ranks: ", num_ranks, flush=True)
 
-    num_tokens, hidden, num_topk, num_experts = 96, 8192, 8, 72
+    a_start_rank = 0
+    a_num_ranks = 16
+    e_start_rank = a_start_rank + a_num_ranks
+    e_num_ranks = num_ranks - a_num_ranks
+
+    num_tokens, hidden, num_topk, num_experts = 96, 8192, 8, 24
+
     assert (
         num_tokens <= num_max_tokens
     ), "num_tokens must be less equal to num_max_tokens"
     num_rdma_ranks = num_ranks / 8
     num_local_experts = num_experts / num_ranks
-    num_rdma_bytes = deep_ep.Buffer.get_low_latency_rdma_size_hint_two_stage(
-        num_max_tokens, hidden, num_ranks, num_experts, num_topk
+    num_rdma_bytes = deep_ep.M2NBuffer.get_low_latency_rdma_size_hint_two_stage(
+        num_max_tokens, hidden, num_ranks, a_num_ranks, e_num_ranks, num_experts, num_topk
     )
     use_fp8 = True
-    num_nvl_bytes = deep_ep.Buffer.get_low_latency_nvl_size_hint_two_stage(
-        num_max_tokens, hidden, num_ranks, num_experts, num_topk, use_fp8
+    num_nvl_bytes = deep_ep.M2NBuffer.get_low_latency_nvl_size_hint_two_stage(
+        num_max_tokens, hidden, num_ranks, a_num_ranks, e_num_ranks, num_experts, num_topk, use_fp8
     )
     print(
         f'Allocating rdma buffer size: {num_rdma_bytes / 1e6} MB, nvl buffer size: {num_nvl_bytes / 1e6} MB...',
         flush=True,
     )
-    buffer = deep_ep.Buffer(
+
+    buffer = deep_ep.M2NBuffer(
         group,
+        a_start_rank,
+        a_num_ranks,
+        e_start_rank,
+        e_num_ranks,
         num_nvl_bytes=num_nvl_bytes,
         num_rdma_bytes=num_rdma_bytes,
         low_latency_mode=True,
@@ -427,6 +484,10 @@ def test_loop():
         use_fp8,
         rank,
         num_ranks,
+        a_start_rank,
+        a_num_ranks,
+        e_start_rank,
+        e_num_ranks,
         group,
         buffer,
         seed=1,

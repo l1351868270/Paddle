@@ -1191,6 +1191,32 @@ class Buffer:
             hook,
         )
 
+
+class M2NBuffer(object):
+    def __init__(
+        self,
+        group: Group,
+        a_start_rank: int,
+        a_num_ranks: int,
+        e_start_rank: int,
+        e_num_ranks: int,
+        num_nvl_bytes: int = 0,
+        num_rdma_bytes: int = 0,
+        low_latency_mode: bool = False,
+        num_qps_per_rank: int = 12,
+    ) -> None:
+        self.a_start_rank = a_start_rank
+        self.a_num_ranks = a_num_ranks
+        self.e_start_rank = e_start_rank
+        self.e_num_ranks = e_num_ranks
+        self.all2all_buffer = Buffer(
+            group,
+            num_nvl_bytes = num_nvl_bytes,
+            num_rdma_bytes = num_rdma_bytes,
+            low_latency_mode = low_latency_mode,
+            num_qps_per_rank = num_qps_per_rank,
+        )
+
     def a2e_isend_two_stage(
         self,
         x: paddle.Tensor,
@@ -1205,6 +1231,10 @@ class Buffer:
         EventOverlap,
         M2NWorker,
     ]:
+        assert num_experts % self.e_num_ranks == 0
+        m2n_topk_idx = topk_idx + self.e_start_rank * (num_experts // self.e_num_ranks)
+        m2n_num_experts = (num_experts // self.e_num_ranks)  * (self.a_num_ranks + self.e_num_ranks)
+        
         (
             packed_recv_x,
             _,
@@ -1212,12 +1242,12 @@ class Buffer:
             handle,
             event,
             hook,
-        ) = self.low_latency_dispatch_two_stage(
+        ) = self.all2all_buffer.low_latency_dispatch_two_stage(
             x,
-            topk_idx,
+            m2n_topk_idx,
             topk_weights,
             num_max_dispatch_tokens_per_rank,
-            num_experts,
+            m2n_num_experts,
             use_fp8,
             async_finish = False,
             return_recv_hook = True,
@@ -1259,6 +1289,9 @@ class Buffer:
             dtype="float32",
         )
 
+        assert num_experts % self.e_num_ranks == 0
+        m2n_num_experts = (num_experts // self.e_num_ranks)  * (self.a_num_ranks + self.e_num_ranks)
+
         (
             packed_recv_x,
             packed_recv_count,
@@ -1266,12 +1299,12 @@ class Buffer:
             handle,
             event,
             hook,
-        ) = self.low_latency_dispatch_two_stage(
+        ) = self.all2all_buffer.low_latency_dispatch_two_stage(
             x,
             topk_idx,
             topk_weights,
             num_max_dispatch_tokens_per_rank,
-            num_experts,
+            m2n_num_experts,
             use_fp8,
             async_finish = True,
             return_recv_hook = False,
@@ -1304,7 +1337,7 @@ class Buffer:
             dtype="float32",
         )
 
-        _, event, hook = self.low_latency_combine_two_stage(
+        _, event, hook = self.all2all_buffer.low_latency_combine_two_stage(
             x,
             topk_idx,
             topk_weights,
@@ -1330,9 +1363,20 @@ class Buffer:
         dispatch_use_fp8: bool = False,
         out: paddle.Tensor | None = None,
     ) -> tuple[paddle.Tensor, EventOverlap, M2NWorker]:
-        combined_x, event, hook = self.low_latency_combine_two_stage(
+        (
+            src_info,
+            layout_range,
+            rdma_send_flags,
+            packed_rdma_recv_count,
+            num_max_dispatch_tokens_per_rank,
+            hidden,
+            num_experts,
+        ) = handle
+        m2n_topk_idx = topk_idx + self.e_start_rank * (num_experts // self.e_num_ranks)
+        
+        combined_x, event, hook = self.all2all_buffer.low_latency_combine_two_stage(
             x,
-            topk_idx,
+            m2n_topk_idx,
             topk_weights,
             handle,
             async_finish=False,
@@ -1345,4 +1389,47 @@ class Buffer:
             combined_x,
             event,
             M2NWorker(hook),
+        )
+
+    @staticmethod
+    def get_low_latency_rdma_size_hint_two_stage(
+        num_max_dispatch_tokens_per_rank: int,
+        hidden: int,
+        num_ranks: int,
+        a_num_ranks: int,
+        e_num_ranks: int,
+        num_experts: int,
+        num_topk: int,
+    ) -> int:
+        assert num_ranks == a_num_ranks + e_num_ranks
+        assert num_experts % e_num_ranks == 0
+        m2n_num_experts = (num_experts // e_num_ranks) * (a_num_ranks + e_num_ranks)
+        return Buffer.get_low_latency_rdma_size_hint_two_stage(
+            num_max_dispatch_tokens_per_rank,
+            hidden,
+            num_ranks,
+            m2n_num_experts,
+            num_topk,
+        )
+
+    def get_low_latency_nvl_size_hint_two_stage(
+        num_max_dispatch_tokens_per_rank: int,
+        hidden: int,
+        num_ranks: int,
+        a_num_ranks: int,
+        e_num_ranks: int,
+        num_experts: int,
+        num_topk: int,
+        use_fp8: bool,
+    ) -> int:
+        assert num_ranks == a_num_ranks + e_num_ranks
+        assert num_experts % e_num_ranks == 0
+        m2n_num_experts = (num_experts // e_num_ranks) * (a_num_ranks + e_num_ranks)
+        return Buffer.get_low_latency_nvl_size_hint_two_stage(
+            num_max_dispatch_tokens_per_rank,
+            hidden,
+            num_ranks,
+            m2n_num_experts,
+            num_topk,
+            use_fp8,
         )
