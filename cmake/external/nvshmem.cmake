@@ -27,7 +27,7 @@ else()
 endif()
 
 # set(NVSHMEM_INSTALL_DIR ${THIRD_PARTY_PATH}/install/nvshmem)
-set(NVSHMEM_INSTALL_DIR /workspace/nvshmem)
+set(NVSHMEM_INSTALL_DIR /ssd2/lishuliang/nvshmem)
 
 set(NVSHMEM_PREFIX_DIR ${THIRD_PARTY_PATH}/nvshmem)
 set(NVSHMEM_SOURCE_DIR ${NVSHMEM_PREFIX_DIR}/src/extern_nvshmem)

@@ -305,7 +305,6 @@ def test_main(
         print(f'[rank: {rank}][e2a_irecv_two_stage] '
               f'avg_t: {avg_t_fn2 * 1e6:.2f} us, min_t: {min_t_fn2 * 1e6:.2f} us, max_t: {max_t_fn2 * 1e6:.2f} us', flush=True)
 
-
     if rank >= e_start_rank and rank < e_start_rank + e_num_ranks:
         # x = paddle.empty(
         #     (0, hidden), 
