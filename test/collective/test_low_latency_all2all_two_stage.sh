@@ -16,9 +16,8 @@ unset ${name}
 done
 
 export LD_LIBRARY_PATH=/workspace/nvshmem/lib:${LD_LIBRARY_PATH}
-export NVSHMEM_BOOTSTRAP_UID_SOCK_IFNAME=bond0
-export IP_LIST="127.0.0.1"
-# export IP_LIST="10.57.151.26,10.57.150.75"
+export NVSHMEM_BOOTSTRAP_UID_SOCK_IFNAME=eth0
+export IP_LIST="10.94.130.151,10.94.130.152"
 export NCCL_DEBUG=WARN
 
 export devices=0,1,2,3,4,5,6,7

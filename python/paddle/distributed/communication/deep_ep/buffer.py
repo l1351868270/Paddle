@@ -1233,7 +1233,7 @@ class M2NBuffer(object):
     ]:
         assert num_experts % self.e_num_ranks == 0
         m2n_topk_idx = topk_idx + self.e_start_rank * (num_experts // self.e_num_ranks)
-        m2n_num_experts = (num_experts // self.e_num_ranks)  * (self.a_num_ranks + self.e_num_ranks)
+        m2n_num_experts = (num_experts // self.e_num_ranks) * (self.a_num_ranks + self.e_num_ranks)
         
         (
             packed_recv_x,

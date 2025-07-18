@@ -25,7 +25,6 @@ from paddle.distributed.communication import deep_ep
 
 num_max_tokens = 512
 
-
 def bench_split(fn1, fn2, fn1_wait: bool = True, fn2_wait: bool = True, num_warmups: int = 50, num_tests: int = 50):
     # clear
     cache = paddle.empty((int(256e6 // 4),), dtype="int32")
@@ -167,8 +166,8 @@ def test_main(
     paddle.seed(seed + rank)
     random.seed(seed + rank)
 
-    assert num_experts % num_ranks == 0
-    num_local_experts = num_experts // num_ranks
+    assert num_experts % e_num_ranks == 0
+    num_local_experts = num_experts // e_num_ranks
     num_rdma_ranks = num_ranks / 8
 
     # NOTES: the integers greater than 256 exceeds the BF16 precision limit
@@ -177,15 +176,16 @@ def test_main(
         num_ranks - rank_offset < 257
     ), 'Too many ranks (exceeding test precision limit)'
 
-    x = paddle.ones((num_tokens, hidden), dtype="bfloat16") * (
-        rank - rank_offset
-    )
-    x[:, -128:] = paddle.arange(0, num_tokens, dtype="bfloat16").view((-1, 1))
+    # x = paddle.ones((num_tokens, hidden), dtype="bfloat16") * (rank - rank_offset)
+    # x[:, -128:] = paddle.arange(0, num_tokens, dtype="bfloat16").view((-1, 1))
+    x = paddle.randn((num_tokens, hidden), dtype="bfloat16")
+    # x = paddle.ones((num_tokens, hidden), dtype="bfloat16") * 5
     topk_idx = paddle.randint(
         0, num_experts, shape=[num_tokens, num_topk], dtype="int64"
     )
     print(f"rank: {rank}, num_local_experts: {num_local_experts}")
     topk_weights = paddle.randn((num_tokens, num_topk), dtype="float32").abs_()
+    # topk_weights = paddle.ones((num_tokens, num_topk), dtype="float32") 
     print("x: ", x, flush=True)
     print("topk_idx: ", topk_idx, flush=True)
     print("topk_weights: ", topk_weights, flush=True)
@@ -204,28 +204,26 @@ def test_main(
     print("run_time: ", run_time)
     print("num_experts: ", num_experts)
 
-    if rank >= a_start_rank and rank < a_start_rank + a_num_ranks:
-        # # a2e_isend
-        # (
-        #     packed_recv_x,
-        #     packed_recv_count,
-        #     rdma_send_flags,
-        #     handle,
-        #     event,
-        #     hook,
-        # ) = buffer.low_latency_dispatch_two_stage(
-        #     x,
-        #     topk_idx,
-        #     topk_weights,
-        #     num_max_tokens,
-        #     num_experts,
-        #     use_fp8=use_fp8,
-        #     async_finish=False,
-        #     return_recv_hook=True,
-        # )
-        # # a2e_isend wait
-        # hook()
+    ref_recv_x = paddle.zeros((e_num_ranks, num_local_experts, hidden), dtype=paddle.float32) # [8, 3, 128]
+    gbl_recv_x = paddle.zeros((e_num_ranks, num_local_experts, hidden), dtype=paddle.float32) # [8, 3, 128]
+    ref_combin_x = paddle.zeros((num_tokens, hidden), dtype=paddle.float32)  # [96, 8192]
+    gbl_combin_x = paddle.zeros((num_tokens, hidden), dtype=paddle.float32)  # [96, 8192]
 
+    if rank >= a_start_rank and rank < a_start_rank + a_num_ranks:
+        if not use_fp8:
+            ref_recv_x.zero_()
+            gbl_recv_x.zero_()
+            ref_combin_x.zero_()
+            gbl_combin_x.zero_()
+            for i in range(num_tokens):
+                for k, expert_id in enumerate(topk_idx[i]):
+                    if expert_id == -1:
+                        continue
+                    erank_id = expert_id // num_local_experts # 0-7
+                    local_expert_id = expert_id % num_local_experts # 0-2
+                    ref_recv_x[erank_id, local_expert_id] += x[i].to(paddle.float32)
+                    ref_combin_x[i] += (x[i].to(paddle.float32) * topk_weights[i][k])
+    
         packed_recv_x, handle, event, req = buffer.a2e_isend_two_stage(
             x,
             topk_idx,
@@ -247,19 +245,6 @@ def test_main(
         else:
             simulated_gemm_x = packed_recv_x.clone()
 
-        # combined_x, event, hook = buffer.low_latency_combine_two_stage(
-        #     simulated_gemm_x,
-        #     topk_idx,
-        #     topk_weights,
-        #     handle,
-        #     async_finish=False,
-        #     dispatch_use_fp8=use_fp8,
-        #     return_recv_hook=True,
-        #     out=None,
-        # )
-
-        # hook()
-
         e2a_x, event, req = buffer.e2a_irecv_two_stage(
             simulated_gemm_x, 
             topk_idx,
@@ -272,6 +257,8 @@ def test_main(
         req.wait()
         dist.barrier()
 
+        gbl_combin_x = e2a_x.to(paddle.float32)
+
         def a2e_isend_func():
             packed_recv_x, handle, event, req = buffer.a2e_isend_two_stage(
                 x,
@@ -281,9 +268,6 @@ def test_main(
                 num_experts,
                 use_fp8=use_fp8,
             )
-
-            # event.current_stream_wait()
-            # req.wait()
             return req
 
         def e2a_irecv_func():
@@ -295,7 +279,6 @@ def test_main(
                 dispatch_use_fp8=use_fp8,
                 out=None,
             )
-            # event.current_stream_wait()
             req.wait()
             return req
 
@@ -306,42 +289,6 @@ def test_main(
               f'avg_t: {avg_t_fn2 * 1e6:.2f} us, min_t: {min_t_fn2 * 1e6:.2f} us, max_t: {max_t_fn2 * 1e6:.2f} us', flush=True)
 
     if rank >= e_start_rank and rank < e_start_rank + e_num_ranks:
-        # x = paddle.empty(
-        #     (0, hidden), 
-        #     dtype="bfloat16"
-        # )
-
-        # topk_idx = paddle.empty(
-        #     (0, num_topk),
-        #     dtype='int64',
-        # )
-
-        # topk_weights = paddle.empty(
-        #     (0, num_topk), 
-        #     dtype="float32",
-        # )
-
-        # # a2e_irecv
-        # (
-        #     packed_recv_x,
-        #     packed_recv_count,
-        #     rdma_send_flags,
-        #     handle,
-        #     event,
-        #     hook,
-        # ) = buffer.low_latency_dispatch_two_stage(
-        #     x,
-        #     topk_idx,
-        #     topk_weights,
-        #     num_max_tokens,
-        #     num_experts,
-        #     use_fp8=use_fp8,
-        #     async_finish=False,
-        #     return_recv_hook=True,
-        # )
-        # # a2e_irecv wait
-        # hook()
-
         (
             packed_recv_x,
             packed_recv_count,
@@ -360,8 +307,11 @@ def test_main(
         print(f'[rank: {rank}, packed_recv_count: {packed_recv_count}], packed_recv_x[1]: {packed_recv_x[1]}', flush=True)
         dist.barrier()
 
-        # e2a isend
+        if not use_fp8:
+            for local_expert_id in range(num_local_experts):
+                gbl_recv_x[rank - e_start_rank, local_expert_id] = packed_recv_x[local_expert_id, :packed_recv_count[local_expert_id]].to(paddle.float32).sum(0)
 
+        # e2a isend
         if use_fp8:
             simulated_gemm_x = per_token_cast_back(
                 packed_recv_x[0].view((-1, hidden)),
@@ -369,18 +319,6 @@ def test_main(
             ).view(packed_recv_x[0].shape)
         else:
             simulated_gemm_x = packed_recv_x.clone()
-
-        # combined_x, event, hook = buffer.low_latency_combine_two_stage(
-        #     simulated_gemm_x,
-        #     topk_idx,
-        #     topk_weights,
-        #     handle,
-        #     async_finish=False,
-        #     dispatch_use_fp8=use_fp8,
-        #     return_recv_hook=True,
-        #     out=None,
-        # )
-        # hook()
 
         event, req = buffer.e2a_isend_two_stage(
             simulated_gemm_x, 
@@ -420,8 +358,6 @@ def test_main(
                 dispatch_use_fp8=use_fp8,
                 out=None,
             )
-            # event.current_stream_wait()
-            # req.wait()
             return req
 
         avg_t_fn1, min_t_fn1, max_t_fn1, avg_t_fn2, min_t_fn2, max_t_fn2 = bench_split(a2e_irecv_func, e2a_isend_func, fn1_wait=False, fn2_wait=True)
@@ -430,8 +366,17 @@ def test_main(
         print(f'[rank: {rank}][e2a_isend_two_stage] '
               f'avg_t: {avg_t_fn2 * 1e6:.2f} us, min_t: {min_t_fn2 * 1e6:.2f} us, max_t: {max_t_fn2 * 1e6:.2f} us', flush=True)
 
+    if not use_fp8:
+        dist.all_reduce(ref_recv_x, group=group)
+        dist.all_reduce(gbl_recv_x, group=group)
+        assert paddle.allclose(ref_recv_x, gbl_recv_x, rtol=1e-3, atol=1e-3), f"[rank: {rank}], ref_recv_x: {ref_recv_x}, gbl_recv_x: {gbl_recv_x}"
+        print(f"[rank: {rank}], ref_recv_x: {ref_recv_x}, gbl_recv_x: {gbl_recv_x}")
+        dist.all_reduce(ref_combin_x, group=group)
+        dist.all_reduce(gbl_combin_x, group=group)
+        assert paddle.allclose(ref_combin_x, gbl_combin_x, rtol=1.0, atol=1.0), f"[rank: {rank}], ref_combin_x: {ref_combin_x}, gbl_combin_x: {gbl_combin_x}"
+        print(f"[rank: {rank}], ref_combin_x: {ref_combin_x}, gbl_combin_x: {gbl_combin_x}")
+        print(f"rank: {rank} passed the check")
     dist.barrier()
-
 
 def test_loop():
     rank = dist.get_rank()
@@ -455,6 +400,7 @@ def test_loop():
     num_rdma_bytes = deep_ep.M2NBuffer.get_low_latency_rdma_size_hint_two_stage(
         num_max_tokens, hidden, num_ranks, a_num_ranks, e_num_ranks, num_experts, num_topk
     )
+    
     use_fp8 = True
     num_nvl_bytes = deep_ep.M2NBuffer.get_low_latency_nvl_size_hint_two_stage(
         num_max_tokens, hidden, num_ranks, a_num_ranks, e_num_ranks, num_experts, num_topk, use_fp8
