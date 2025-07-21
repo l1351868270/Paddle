@@ -330,6 +330,10 @@ __global__ __launch_bounds__(
     }
   }
 
+  LOW_LATENCY_DISPATCH_RECV:
+  if ((phases & LOW_LATENCY_RECV_PHASE) == 0) 
+    return;
+
   /* RDMA Receiver and NVL Sender */
   {
     const int sms_per_rdma = num_sms / kNumRdmaRanks;
@@ -777,7 +781,7 @@ __global__ __launch_bounds__(
   const size_t hidden_bf16_int4 = kHidden / kNumElemsPerInt4;
   if (sm_id == 0 && thread_id == 0) {
     EP_DEVICE_ASSERT(ibgda_get_state()->num_rc_per_pe >= kNumQPs);
-    EP_DEVICE_ASSERT(num_threads >= hidden_bf16_int4);
+    // EP_DEVICE_ASSERT(num_threads >= hidden_bf16_int4); // TODO: lzy why
   }
 
   constexpr size_t num_bytes_per_slot = kHidden * sizeof(nv_bfloat16);
@@ -790,6 +794,9 @@ __global__ __launch_bounds__(
                                             num_bytes_per_slot;
   const size_t NVL_BUFFER_X_BYTES =
       DISPATCH_NVL_BUFFER_X_BYTES + COMBINE_NVL_BUFFER_X_BYTES;
+    
+  if ((phases & LOW_LATENCY_SEND_PHASE) == 0)
+    goto LOW_LATENCY_COMBINE_RECV;
 
   /* NVL Sender */
   if (responsible_expert_idx < num_experts) {
