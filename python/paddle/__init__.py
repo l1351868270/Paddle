@@ -15,6 +15,8 @@
 import math
 import typing
 
+print("update paddle")
+
 __is_metainfo_generated = False
 try:
     from paddle.cuda_env import *  # noqa: F403
