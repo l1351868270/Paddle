@@ -272,7 +272,7 @@ def test_main(
 
         def e2a_irecv_func():
             e2a_x, event, req = buffer.e2a_irecv_two_stage(
-                simulated_gemm_x, 
+                simulated_gemm_x,
                 topk_idx,
                 topk_weights,
                 handle,
@@ -396,12 +396,10 @@ def test_loop():
         num_tokens <= num_max_tokens
     ), "num_tokens must be less equal to num_max_tokens"
     num_rdma_ranks = num_ranks / 8
-    num_local_experts = num_experts / num_ranks
     num_rdma_bytes = deep_ep.M2NBuffer.get_low_latency_rdma_size_hint_two_stage(
         num_max_tokens, hidden, num_ranks, a_num_ranks, e_num_ranks, num_experts, num_topk
     )
-    
-    use_fp8 = True
+    use_fp8 = False
     num_nvl_bytes = deep_ep.M2NBuffer.get_low_latency_nvl_size_hint_two_stage(
         num_max_tokens, hidden, num_ranks, a_num_ranks, e_num_ranks, num_experts, num_topk, use_fp8
     )
