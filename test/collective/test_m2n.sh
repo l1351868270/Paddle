@@ -22,8 +22,9 @@ export IP_LIST="10.94.130.151,10.94.130.152,10.94.130.153"
 export NCCL_DEBUG=WARN
 
 export devices=0,1,2,3,4,5,6,7
-export started_port=6071
+export start_port=6072
 python3.10 -m paddle.distributed.launch \
         --gpus ${devices} \
         --ips ${IP_LIST} \
+        --start_port ${start_port} \
         test_m2n.py
