@@ -235,18 +235,8 @@ def test_main(
 
         req.wait()
         dist.barrier()
-        
-        # e2a irecv
-        if use_fp8:
-            simulated_gemm_x = per_token_cast_back(
-                packed_recv_x[0].view((-1, hidden)),
-                packed_recv_x[1].contiguous().view((-1, hidden // 128)),
-            ).view(packed_recv_x[0].shape)
-        else:
-            simulated_gemm_x = packed_recv_x.clone()
 
         e2a_x, event, req = buffer.e2a_irecv_two_stage(
-            simulated_gemm_x, 
             topk_idx,
             topk_weights,
             handle,
@@ -272,7 +262,6 @@ def test_main(
 
         def e2a_irecv_func():
             e2a_x, event, req = buffer.e2a_irecv_two_stage(
-                simulated_gemm_x,
                 topk_idx,
                 topk_weights,
                 handle,
@@ -396,10 +385,12 @@ def test_loop():
         num_tokens <= num_max_tokens
     ), "num_tokens must be less equal to num_max_tokens"
     num_rdma_ranks = num_ranks / 8
+    num_local_experts = num_experts / num_ranks
     num_rdma_bytes = deep_ep.M2NBuffer.get_low_latency_rdma_size_hint_two_stage(
         num_max_tokens, hidden, num_ranks, a_num_ranks, e_num_ranks, num_experts, num_topk
     )
-    use_fp8 = False
+    
+    use_fp8 = True
     num_nvl_bytes = deep_ep.M2NBuffer.get_low_latency_nvl_size_hint_two_stage(
         num_max_tokens, hidden, num_ranks, a_num_ranks, e_num_ranks, num_experts, num_topk, use_fp8
     )
