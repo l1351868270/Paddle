@@ -15,7 +15,6 @@
 import contextlib
 import random
 from functools import partial
-
 import numpy as np
 
 import paddle
@@ -179,13 +178,13 @@ def test_main(
     # x = paddle.ones((num_tokens, hidden), dtype="bfloat16") * (rank - rank_offset)
     # x[:, -128:] = paddle.arange(0, num_tokens, dtype="bfloat16").view((-1, 1))
     x = paddle.randn((num_tokens, hidden), dtype="bfloat16")
-    # x = paddle.ones((num_tokens, hidden), dtype="bfloat16") * 5
+    # x = paddle.ones((num_tokens, hidden), dtype="bfloat16") * 0.3
     topk_idx = paddle.randint(
         0, num_experts, shape=[num_tokens, num_topk], dtype="int64"
     )
     print(f"rank: {rank}, num_local_experts: {num_local_experts}")
     topk_weights = paddle.randn((num_tokens, num_topk), dtype="float32").abs_()
-    # topk_weights = paddle.ones((num_tokens, num_topk), dtype="float32") 
+    # topk_weights = paddle.ones((num_tokens, num_topk), dtype="float32") * 0.5
     print("x: ", x, flush=True)
     print("topk_idx: ", topk_idx, flush=True)
     print("topk_weights: ", topk_weights, flush=True)
@@ -360,8 +359,6 @@ def test_main(
         dist.all_reduce(gbl_recv_x, group=group)
         assert paddle.allclose(ref_recv_x, gbl_recv_x, rtol=1e-3, atol=1e-3), f"[rank: {rank}], ref_recv_x: {ref_recv_x}, gbl_recv_x: {gbl_recv_x}"
         print(f"[rank: {rank}], ref_recv_x: {ref_recv_x}, gbl_recv_x: {gbl_recv_x}")
-        dist.all_reduce(ref_combin_x, group=group)
-        dist.all_reduce(gbl_combin_x, group=group)
         assert paddle.allclose(ref_combin_x, gbl_combin_x, rtol=1.0, atol=1.0), f"[rank: {rank}], ref_combin_x: {ref_combin_x}, gbl_combin_x: {gbl_combin_x}"
         print(f"[rank: {rank}], ref_combin_x: {ref_combin_x}, gbl_combin_x: {gbl_combin_x}")
         print(f"rank: {rank} passed the check")
@@ -379,7 +376,7 @@ def test_loop():
     e_start_rank = a_start_rank + a_num_ranks
     e_num_ranks = num_ranks - a_num_ranks
 
-    num_tokens, hidden, num_topk, num_experts = 96, 8192, 8, 24
+    num_tokens, hidden, num_topk, num_experts = 96, 8192, 8, 64
 
     assert (
         num_tokens <= num_max_tokens
@@ -390,7 +387,7 @@ def test_loop():
         num_max_tokens, hidden, num_ranks, a_num_ranks, e_num_ranks, num_experts, num_topk
     )
     
-    use_fp8 = True
+    use_fp8 = False
     num_nvl_bytes = deep_ep.M2NBuffer.get_low_latency_nvl_size_hint_two_stage(
         num_max_tokens, hidden, num_ranks, a_num_ranks, e_num_ranks, num_experts, num_topk, use_fp8
     )
