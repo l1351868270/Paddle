@@ -1356,7 +1356,6 @@ class M2NBuffer(object):
 
     def e2a_irecv_two_stage(
         self,
-        x: paddle.Tensor,
         topk_idx: paddle.Tensor,
         topk_weights: paddle.Tensor,
         handle: tuple,
@@ -1370,10 +1369,14 @@ class M2NBuffer(object):
             packed_rdma_recv_count,
             num_max_dispatch_tokens_per_rank,
             hidden,
-            num_experts,
+            m2n_num_experts,
         ) = handle
-        m2n_topk_idx = topk_idx + self.e_start_rank * (num_experts // self.e_num_ranks)
+        m2n_num_ranks = self.a_num_ranks + self.e_num_ranks
+        m2n_topk_idx = topk_idx + self.e_start_rank * (m2n_num_experts // m2n_num_ranks)
         
+        # TODO: only pass the check, this is not needed
+        x = paddle.empty((m2n_num_experts // m2n_num_ranks,  m2n_num_ranks * num_max_dispatch_tokens_per_rank, hidden),
+                         dtype="bfloat16")
         combined_x, event, hook = self.all2all_buffer.low_latency_combine_two_stage(
             x,
             m2n_topk_idx,
