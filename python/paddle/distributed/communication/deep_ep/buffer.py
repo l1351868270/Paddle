@@ -1305,8 +1305,8 @@ class M2NBuffer(object):
             num_max_dispatch_tokens_per_rank,
             m2n_num_experts,
             use_fp8,
-            async_finish = True,
-            return_recv_hook = False,
+            async_finish = False,
+            return_recv_hook = True,
         )
 
         return (
