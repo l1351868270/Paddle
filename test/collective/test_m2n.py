@@ -178,13 +178,13 @@ def test_main(
     # x = paddle.ones((num_tokens, hidden), dtype="bfloat16") * (rank - rank_offset)
     # x[:, -128:] = paddle.arange(0, num_tokens, dtype="bfloat16").view((-1, 1))
     x = paddle.randn((num_tokens, hidden), dtype="bfloat16")
-    # x = paddle.ones((num_tokens, hidden), dtype="bfloat16") * 0.3
+    # x = paddle.ones((num_tokens, hidden), dtype="bfloat16") * 3
     topk_idx = paddle.randint(
         0, num_experts, shape=[num_tokens, num_topk], dtype="int64"
     )
     print(f"rank: {rank}, num_local_experts: {num_local_experts}")
     topk_weights = paddle.randn((num_tokens, num_topk), dtype="float32").abs_()
-    # topk_weights = paddle.ones((num_tokens, num_topk), dtype="float32") * 0.5
+    # topk_weights = paddle.ones((num_tokens, num_topk), dtype="float32") * 5
     print("x: ", x, flush=True)
     print("topk_idx: ", topk_idx, flush=True)
     print("topk_weights: ", topk_weights, flush=True)
@@ -375,7 +375,10 @@ def test_loop():
     a_num_ranks = 16
     e_start_rank = a_start_rank + a_num_ranks
     e_num_ranks = num_ranks - a_num_ranks
-
+    # 64 * 3 / 48 = 4
+    # 64 * 3 / 32 = 6
+    # 64 * 3 / 24 = 8
+    # 64 * 3 / 12 = 16
     num_tokens, hidden, num_topk, num_experts = 96, 8192, 8, 64
 
     assert (
@@ -387,7 +390,7 @@ def test_loop():
         num_max_tokens, hidden, num_ranks, a_num_ranks, e_num_ranks, num_experts, num_topk
     )
     
-    use_fp8 = False
+    use_fp8 = True
     num_nvl_bytes = deep_ep.M2NBuffer.get_low_latency_nvl_size_hint_two_stage(
         num_max_tokens, hidden, num_ranks, a_num_ranks, e_num_ranks, num_experts, num_topk, use_fp8
     )

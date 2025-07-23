@@ -590,6 +590,7 @@ void dispatch(void* packed_recv_x,
   const int dev_id = 0;
   int sm_count;
   cudaDeviceGetAttribute(&sm_count, cudaDevAttrMultiProcessorCount, dev_id);
+  sm_count = 24;
   int num_warp_groups = cell_div(num_experts, sm_count);
   num_warp_groups = (num_warp_groups % 2 == 1) ? num_warp_groups + 1 : num_warp_groups;
   const auto num_sms = max(sm_count, cell_div(num_experts, num_warp_groups));
@@ -1084,6 +1085,7 @@ void combine(void* combined_x,
   const int dev_id = 0;
   int sm_count;
   cudaDeviceGetAttribute(&sm_count, cudaDevAttrMultiProcessorCount, dev_id);
+  sm_count = 24;
   int num_warp_groups = cell_div(num_experts, sm_count);
   num_warp_groups = (num_warp_groups % 2 == 1) ? num_warp_groups + 1 : num_warp_groups;
   const auto num_sms = max(sm_count, cell_div(num_experts, num_warp_groups));
