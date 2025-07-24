@@ -694,6 +694,9 @@ void dispatch(void* packed_recv_x,
                   })})})})});
 }
 
+constexpr int kNumActualTopkDivFour = 2*3;
+constexpr int kMaxNumTokensPerSm = 10;
+
 template <int kNumWarpGroups,
           int kNumWarpsPerGroup,
           int kHidden,
@@ -886,9 +889,51 @@ __global__ __launch_bounds__(
           deal_rdma_rank * num_max_dispatch_tokens_per_rank *
               combine_hidden_bytes;
       // reduce
-      for (int rdma_recv_token_idx = sub_deal_rdma_rank;
+      
+      int self_num_iteration = (sm_id >= num_tokens_to_deal) ? 0 : (1 + (num_tokens_to_deal - sm_id - 1) / sms_per_rdma);
+
+      alignas(16) __shared__ int4 shared_topk_info[kMaxNumTokensPerSm * kNumActualTopkDivFour];
+      __shared__ int4 shared_topknum[kMaxNumTokensPerSm];
+      const auto compute_shared_topk_info_addr = [=](int idx_iteration, int idx_topkdivfour) {
+        return shared_topk_info
+            + idx_iteration * kNumActualTopkDivFour
+            + idx_topkdivfour;
+      };
+
+      int4 temp_buf;
+      int prepare_topk_idx_iteration, prepare_topk_idx_iow, prepare_topk_idx_topkdivfour;
+      if (warp_id== 0) {
+        int index = thread_id;
+        prepare_topk_idx_topkdivfour = index % kNumActualTopkDivFour;
+        index /= kNumActualTopkDivFour;
+        prepare_topk_idx_iteration = index;
+      }
+
+      bool enable_prepare_topk = (warp_id == 0) && (prepare_topk_idx_iteration < self_num_iteration);
+      if (enable_prepare_topk) {{
+        const int prepare_token_idx = sm_id + prepare_topk_idx_iteration * sms_per_rdma;
+        const auto dispatch_rdma_recv_x_now =
+            dispatch_rdma_recv_x_this_rdma_rank +
+            prepare_token_idx * num_bytes_per_msg_dispatch;
+        const int* nvl_rank_meta = reinterpret_cast<const int*>(
+              dispatch_rdma_recv_x_now + sizeof(int4) + dispatch_hidden_bytes +
+              (kDispatchUseFP8 ? kNumScales * sizeof(float) : 0));
+        const int* nvl_rank_meta_now =
+              nvl_rank_meta + rdma_rank * (kTopk * 3 + 1) + 1;
+
+        const int4* src_ptr = reinterpret_cast<const int4*>(nvl_rank_meta_now) + prepare_topk_idx_topkdivfour);
+        int* smem_addr = compute_shared_topk_info_addr(prepare_topk_idx_iteration, prepare_topk_idx_topkdivfour);
+        temp_buf = ld_nc_global(src_ptr);
+        *smem_addr = temp_buf;
+        shared_topknum[prepare_topk_idx_iteration] = *nvl_rank_meta_now;
+              
+      }
+
+      __syncthreads();
+
+      for (int rdma_recv_token_idx = sub_deal_rdma_rank, iteration = 0;
            rdma_recv_token_idx < num_tokens_to_deal;
-           rdma_recv_token_idx += sms_per_rdma) {
+           rdma_recv_token_idx += sms_per_rdma, iteration++) {
         const auto dispatch_rdma_recv_x_now =
             dispatch_rdma_recv_x_this_rdma_rank +
             rdma_recv_token_idx * num_bytes_per_msg_dispatch;
@@ -897,13 +942,20 @@ __global__ __launch_bounds__(
         const int* nvl_rank_meta = reinterpret_cast<const int*>(
             dispatch_rdma_recv_x_now + sizeof(int4) + dispatch_hidden_bytes +
             (kDispatchUseFP8 ? kNumScales * sizeof(float) : 0));
-        const int nvl_rank_nums =
-            *(nvl_rank_meta + rdma_rank * (kTopk * 3 + 1));
-        const int* nvl_rank_meta_now =
-            nvl_rank_meta + rdma_rank * (kTopk * 3 + 1) + 1;
+        
         int4* dst_ptr = reinterpret_cast<int4*>(
             rdma_send_x_this_rdma_rank + index_source * combine_hidden_bytes);
         float combined_values[kNumElemsPerInt4] = {0.0f};
+
+        const int nvl_rank_nums = shared_topknum[iteration];
+        alignas(16) int nvl_rank_meta_now_shared[kTopk * 3];
+        auto reg_meta = reinterpret_cast<int4*>(nvl_rank_meta_now_shared);
+        #pragma unroll
+        for (int i = 0; i < kNumActualTopkDivFour; ++i) {
+          reg_meta[i] = *compute_shared_topk_info_addr(rdma_recv_token_idx, i);
+        }
+        const int* nvl_rank_meta_now = nvl_rank_meta_now_shared;        
+         
         if (thread_id < hidden_bf16_int4) {
           for (int nvl_rank_idx = 0; nvl_rank_idx < nvl_rank_nums;
                nvl_rank_idx += 1) {
