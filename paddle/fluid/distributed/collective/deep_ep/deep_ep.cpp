@@ -1989,6 +1989,13 @@ Buffer::low_latency_dispatch_two_stage(
   }
 
   // Allocate packed tensors
+  auto dispatch_local_recv_x = ConvertPaddleTensorToDetailTensor(
+      paddle::experimental::empty({num_experts *
+                                  num_max_dispatch_tokens_per_rank *
+                                  num_bytes_per_dispatch_msg}, // TODO: lzy
+                                  phi::DataType::INT64,
+                                  phi::GPUPlace(device_id)));
+
   auto packed_recv_x = ConvertPaddleTensorToDetailTensor(
       paddle::experimental::empty({num_local_experts,
                                    num_ranks * num_max_dispatch_tokens_per_rank,
@@ -2040,6 +2047,7 @@ Buffer::low_latency_dispatch_two_stage(
   auto next_clean_meta = next_buffer.clean_meta();
   auto launcher = [=](int phases) {
     internode_ll_two_stage::dispatch(
+        dispatch_local_recv_x.data_ptr(),
         packed_recv_x.data_ptr(),
         packed_recv_x_scales_ptr,
         packed_recv_src_info.data_ptr<int>(),
@@ -2086,7 +2094,8 @@ Buffer::low_latency_dispatch_two_stage(
   std::optional<std::function<void()>> recv_hook = std::nullopt;
   if (return_recv_hook) recv_hook = [=]() { launcher(LOW_LATENCY_RECV_PHASE); }; 
 
-  return {packed_recv_x,
+  return {dispatch_local_recv_x,
+          packed_recv_x,
           packed_recv_x_scales,
           packed_recv_count,
           packed_rdma_recv_count,
@@ -2101,6 +2110,7 @@ std::tuple<deep_ep::detail::Tensor,
            std::optional<EventHandle>,
            std::optional<std::function<void()>>>
 Buffer::low_latency_combine_two_stage(
+    const deep_ep::detail::Tensor& dispatch_local_recv_x,
     const deep_ep::detail::Tensor& x,
     const deep_ep::detail::Tensor& topk_idx,
     const deep_ep::detail::Tensor& topk_weights,
@@ -2173,6 +2183,7 @@ Buffer::low_latency_combine_two_stage(
   auto next_clean_meta = next_buffer.clean_meta();
   auto launcher = [=](int phases) {
     internode_ll_two_stage::combine(
+        dispatch_local_recv_x.data_ptr(), // TODO: lzy
         combined_x.data_ptr(),
         buffer.combine_rdma_recv_data_buffer,
         buffer.combine_rdma_recv_flag_buffer,
