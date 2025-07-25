@@ -1982,7 +1982,12 @@ Buffer::low_latency_dispatch_two_stage(
   auto next_buffer = layout.buffers[1];
 
   // Wait previous tasks to be finished
-  auto launch_stream = calc_ctx->stream();
+  // NOTES: the hook mode will always use the default stream
+  auto compute_stream = calc_ctx->stream();
+  auto launch_stream = return_recv_hook ? compute_stream : comm_stream;
+  EP_HOST_ASSERT(!(async && return_recv_hook));
+  if (!return_recv_hook) stream_wait(launch_stream, compute_stream);
+
   auto return_x_dtype = phi::DataType::BFLOAT16;
   if (use_fp8) {
     return_x_dtype = phi::DataType::FLOAT8_E4M3FN;
@@ -2076,11 +2081,14 @@ Buffer::low_latency_dispatch_two_stage(
 
   // Wait streams
   std::optional<EventHandle> event;
-  // if (async) {
-  //   event = EventHandle(launch_stream);
-  // } else if (!return_recv_hook) {
-  //   stream_wait(compute_stream, launch_stream);
-  // }
+  if (async) {
+    // NOTES: we must ensure the all tensors will not be deallocated before the
+    // stream-wait happens, so in Python API, we must wrap all tensors into the
+    // event handle.
+    event = EventHandle(launch_stream);
+  } else if (!return_recv_hook) {
+    stream_wait(compute_stream, launch_stream);
+  }
 
   // Receiver callback
   std::optional<std::function<void()>> recv_hook = std::nullopt;
@@ -2154,7 +2162,12 @@ Buffer::low_latency_combine_two_stage(
   auto buffer = layout.buffers[1];
   auto next_buffer = layout.buffers[0];
 
-  auto launch_stream = calc_ctx->stream();
+  // Wait previous tasks to be finished
+  // NOTES: the hook mode will always use the default stream
+  auto compute_stream = calc_ctx->stream();
+  auto launch_stream = return_recv_hook ? compute_stream : comm_stream;
+  EP_HOST_ASSERT(!(async && return_recv_hook));
+  if (!return_recv_hook) stream_wait(launch_stream, compute_stream);
 
   // Allocate output tensor
   deep_ep::detail::Tensor combined_x;
@@ -2207,11 +2220,14 @@ Buffer::low_latency_combine_two_stage(
 
   // Wait streams
   std::optional<EventHandle> event;
-  // if (async) {
-  //   event = EventHandle(launch_stream);
-  // } else if (!return_recv_hook) {
-  //   stream_wait(compute_stream, launch_stream);
-  // }
+  if (async) {
+    // NOTES: we must ensure the all tensors will not be deallocated before the
+    // stream-wait happens, so in Python API, we must wrap all tensors into the
+    // event handle.
+    event = EventHandle(launch_stream);
+  } else if (!return_recv_hook) {
+    stream_wait(compute_stream, launch_stream);
+  }
 
   // Receiver callback
   std::optional<std::function<void()>> recv_hook = std::nullopt;
