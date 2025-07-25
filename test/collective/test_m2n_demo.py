@@ -58,7 +58,7 @@ def test_main(
     ), 'Too many ranks (exceeding test precision limit)'
 
     GB = 192
-    MB = 64
+    MB = 192
     # MB = GB
     num_micro_batches = GB // MB
     # num_hidden_layers = 54
@@ -71,6 +71,7 @@ def test_main(
             rank - rank_offset
         )
         x[:, -128:] = paddle.arange(0, num_tokens, dtype="bfloat16").view((-1, 1))
+        x = paddle.randn((num_tokens, hidden), dtype="bfloat16")
         topk_idx = paddle.randint(
             0, num_experts, shape=[num_tokens, num_topk], dtype="int64"
         )
@@ -84,7 +85,6 @@ def test_main(
         e2a_irecv_events = [None] * num_micro_batches
         e2a_irecv_reqs = [None] * num_micro_batches
         e2a_xs = [None] * num_micro_batches
-        dist.barrier() 
 
         a2e_irecv_reqs = [None] * num_micro_batches
         e2a_irecv_req_cur = None
@@ -93,84 +93,154 @@ def test_main(
         a2e_packed_recv_counts = [None] * num_micro_batches
         a2e_rdma_send_flagss = [None] * num_micro_batches
 
-        # for mb_idx in range(1):
-        #     e2a_xs[mb_idx], e2a_irecv_events[mb_idx], e2a_irecv_req_cur = buffer.e2a_irecv_two_stage(
+        a2e_isend_req = None
+
+        # for idx in range(moe_layer_start_index * num_micro_batches, num_hidden_layers * num_micro_batches):
+        #     layer_idx = idx // (num_micro_batches)
+        #     mb_idx = idx % num_micro_batches
+        #     attention(num_tokens, hidden)
+        #     if idx > moe_layer_start_index * num_micro_batches:
+        #         # a2e_isend_req.wait()
+        #         # print(f"rank: {rank}, layer_idx: {layer_idx}, mb_idx: {mb_idx}, a2e_isend wait", flush=True)
+
+        #         e2a_x, event, req = buffer.e2a_irecv_two_stage(
+        #             topk_idx,
+        #             topk_weights,
+        #             handle,
+        #             dispatch_use_fp8=use_fp8,
+        #             out=None,
+        #         )
+        #         print(f"rank: {rank}, layer_idx: {layer_idx}, mb_idx: {mb_idx}, e2a_irecv", flush=True)
+        #         req.wait()
+        #         print(f"rank: {rank}, layer_idx: {layer_idx}, mb_idx: {mb_idx}, e2a_irecv wait", flush=True)
+
+
+        #     packed_recv_x, handle, event, a2e_isend_req = buffer.a2e_isend_two_stage(
+        #         x,
         #         topk_idx,
         #         topk_weights,
-        #         handle,
-        #         dispatch_use_fp8=use_fp8,
-        #         out=None,
+        #         num_max_tokens,
+        #         num_experts,
+        #         use_fp8=use_fp8,
         #     )
+        #     print(f"rank: {rank}, layer_idx: {layer_idx}, mb_idx: {mb_idx}, a2e_isend", flush=True)
+            
+        #     # if idx == num_hidden_layers * num_micro_batches - 1:
+        #     #     a2e_isend_req.wait()
+        #     #     print(f"rank: {rank}, layer_idx: {layer_idx}, mb_idx: {mb_idx}, a2e_isend wait", flush=True)
+        e2a_irecv_reqs = [None] * 3
+        # 1_1
+        attention(num_tokens, hidden)
+        print(f"rank: {rank}, 1_1", flush=True)
+        packed_recv_x, handle, event, a2e_isend_req = buffer.a2e_isend_two_stage(
+            x,
+            topk_idx,
+            topk_weights,
+            num_max_tokens,
+            num_experts,
+            use_fp8=use_fp8,
+        )
+        print(f"rank: {rank}, a2e_isend", flush=True)
+        # e2a_x, event, e2a_irecv_reqs[0] = buffer.e2a_irecv_two_stage(
+        #     topk_idx,
+        #     topk_weights,
+        #     handle,
+        #     dispatch_use_fp8=use_fp8,
+        #     out=None,
+        # )
+        # print(f"rank: {rank}, e2a_irecv", flush=True)
 
-        for layer_idx in range(moe_layer_start_index, num_hidden_layers):  
-            for mb_idx in range(num_micro_batches):
-                mb_idx_next = (mb_idx + 1) % num_micro_batches
-                # attention(num_tokens, hidden)
-                # packed_recv_x, handle, event, a2e_isend_req_cur = buffer.a2e_isend_two_stage(
-                #     x,
-                #     topk_idx,
-                #     topk_weights,
-                #     num_max_tokens,
-                #     num_experts,
-                #     use_fp8=use_fp8,
-                # )
-                # a2e_isend_req_cur.wait()
-                # # paddle.device.synchronize()
-                # print(f"rank: {rank}, layer_idx: {layer_idx}, mb_idx: {mb_idx}, a2e_isend", flush=True)
+        attention(num_tokens, hidden)
+        print(f"rank: {rank}, 2_1", flush=True)
+        a2e_isend_req.wait()
+        
+        print(f"rank: {rank}, a2e_isend wait", flush=True)
+        packed_recv_x, handle, event, a2e_isend_req = buffer.a2e_isend_two_stage(
+            x,
+            topk_idx,
+            topk_weights,
+            num_max_tokens,
+            num_experts,
+            use_fp8=use_fp8,
+        )
+        print(f"rank: {rank}, a2e_isend", flush=True)
 
-                # if not (
-                #     (layer_idx == moe_layer_start_index and mb_idx < num_micro_batches - 1) 
-                #     or (layer_idx == num_hidden_layers - 1 and mb_idx == num_micro_batches - 1)
-                # ):
-                #     (
-                #         e2a_xs[mb_idx_next], 
-                #         e2a_irecv_events[mb_idx_next], 
-                #         e2a_irecv_req_cur,
-                #     ) = buffer.e2a_irecv_two_stage(
-                #         topk_idx,
-                #         topk_weights,
-                #         a2e_handles[mb_idx_next],
-                #         dispatch_use_fp8=use_fp8,
-                #         out=None,
-                #     )
-                #     print(f"rank: {rank}, layer_idx: {layer_idx}, mb_idx: {mb_idx_next}, e2a_irecv", flush=True)
-                
-                # if layer_idx > moe_layer_start_index:
-                #     e2a_irecv_req_cur.wait()
-                #     # paddle.device.synchronize()
-                #     print(f"rank: {rank}, layer_idx: {layer_idx}, mb_idx: {mb_idx_next}, e2a_irecv wait", flush=True)
+        # e2a_x, event, e2a_irecv_reqs[1] = buffer.e2a_irecv_two_stage(
+        #     topk_idx,
+        #     topk_weights,
+        #     handle,
+        #     dispatch_use_fp8=use_fp8,
+        #     out=None,
+        # )
+        # print(f"rank: {rank}, e2a_irecv", flush=True)
 
-                attention(num_tokens, hidden)
-                # # if layer_idx < num_hidden_layers:
-                if a2e_isend_req_cur is not None:
-                    a2e_isend_req_cur.wait()
-                    # TODO: without this will hang
-                    paddle.device.synchronize()
-                    print(f"rank: {rank}, layer_idx: {layer_idx}, mb_idx: {(mb_idx -1) % num_micro_batches}, a2e_isend wait", flush=True)
-                # TODO: wait 行为与预期不符，需要加新功能
-                time.sleep(0.001)
-                
-                (
-                    a2e_packed_recv_xs[mb_idx], 
-                    a2e_handles[mb_idx], 
-                    event, 
-                    a2e_isend_req_cur,
-                ) = buffer.a2e_isend_two_stage(
-                    x,
-                    topk_idx,
-                    topk_weights,
-                    num_max_tokens,
-                    num_experts,
-                    use_fp8=use_fp8,
-                )
-                # paddle.device.synchronize()
-                print(f"rank: {rank}, layer_idx: {layer_idx}, mb_idx: {mb_idx}, a2e_isend", flush=True)
-                
+        attention(num_tokens, hidden)
+        print(f"rank: {rank}, 3_1", flush=True)
+        a2e_isend_req.wait()
+        print(f"rank: {rank}, a2e_isend wait", flush=True)
+        packed_recv_x, handle, event, a2e_isend_req = buffer.a2e_isend_two_stage(
+            x,
+            topk_idx,
+            topk_weights,
+            num_max_tokens,
+            num_experts,
+            use_fp8=use_fp8,
+        )
+        print(f"rank: {rank}, a2e_isend", flush=True)
+        a2e_isend_req.wait()
+        print(f"rank: {rank}, a2e_isend wait", flush=True)
 
-                # if layer_idx == num_hidden_layers - 1:
-        a2e_isend_req_cur.wait()
-        paddle.device.synchronize()
-        print(f"rank: {rank}, layer_idx: {num_hidden_layers}, mb_idx: {mb_idx}, a2e_isend wait +++", flush=True)
+        # e2a_x, event, e2a_irecv_reqs[2] = buffer.e2a_irecv_two_stage(
+        #     topk_idx,
+        #     topk_weights,
+        #     handle,
+        #     dispatch_use_fp8=use_fp8,
+        #     out=None,
+        # )
+        # print(f"rank: {rank}, e2a_irecv", flush=True)
+        # e2a_irecv_reqs[0].wait()
+        # print(f"rank: {rank}, e2a_irecv wait", flush=True)
+
+        # attention(num_tokens, hidden)
+        # print(f"rank: {rank}, 1_2", flush=True)
+        # a2e_isend_req.wait()
+        # print(f"rank: {rank}, a2e_isend wait", flush=True)
+        # packed_recv_x, handle, event, a2e_isend_req = buffer.a2e_isend_two_stage(
+        #     x,
+        #     topk_idx,
+        #     topk_weights,
+        #     num_max_tokens,
+        #     num_experts,
+        #     use_fp8=use_fp8,
+        # )
+        # print(f"rank: {rank}, a2e_isend", flush=True)
+        # e2a_irecv_reqs[1].wait()
+        # print(f"rank: {rank}, e2a_irecv wait", flush=True)
+
+        # attention(num_tokens, hidden)
+        # print(f"rank: {rank}, 2_2", flush=True)
+        # a2e_isend_req.wait()
+        # print(f"rank: {rank}, a2e_isend wait", flush=True)
+        # packed_recv_x, handle, event, a2e_isend_req = buffer.a2e_isend_two_stage(
+        #     x,
+        #     topk_idx,
+        #     topk_weights,
+        #     num_max_tokens,
+        #     num_experts,
+        #     use_fp8=use_fp8,
+        # )
+        # print(f"rank: {rank}, a2e_isend", flush=True)
+        # e2a_irecv_reqs[2].wait()
+        # print(f"rank: {rank}, e2a_irecv wait", flush=True)
+
+        # attention(num_tokens, hidden)
+        # print(f"rank: {rank}, 3_2", flush=True)
+        # a2e_isend_req.wait()
+        # print(f"rank: {rank}, a2e_isend wait", flush=True)
+
+        run_time = 1
+        print("run_time: ", run_time)
+        print("num_experts: ", num_experts)
 
     if rank >= e_start_rank and rank < e_start_rank + e_num_ranks:
         e2a_isend_req = None
@@ -179,96 +249,128 @@ def test_main(
         a2e_packed_recv_xs = [None] * num_micro_batches
         a2e_packed_recv_counts = [None] * num_micro_batches
         a2e_rdma_send_flagss = [None] * num_micro_batches
-        dist.barrier()
-        for mb_idx in range(1):
-            (
-                a2e_packed_recv_xs[mb_idx],
-                a2e_packed_recv_counts[mb_idx],
-                a2e_rdma_send_flagss[mb_idx],
-                a2e_handles[mb_idx],
-                event,
-                a2e_irecv_req_cur,
-            ) = buffer.a2e_irecv_two_stage(
-                hidden,
-                num_topk,
-                num_max_tokens,
-                num_experts,
-                use_fp8=use_fp8,
-            )
-            # a2e_irecv_reqs[mb_idx].wait()
-            # paddle.device.synchronize()
-            # moe(num_tokens, hidden)
-            print(f"rank: {rank}, layer_idx: {moe_layer_start_index}, mb_idx: {mb_idx}, a2e_irecv", flush=True)
+        a2e_irecv_req = None
+        # for idx in range(moe_layer_start_index * num_micro_batches, num_hidden_layers * num_micro_batches):
+        #     layer_idx = idx // (num_micro_batches)
+        #     mb_idx = idx % num_micro_batches
+        #     # if idx == moe_layer_start_index * num_micro_batches:
+        #     (
+        #         packed_recv_x,
+        #         packed_recv_count,
+        #         rdma_send_flags,
+        #         handle,
+        #         event,
+        #         a2e_irecv_req,
+        #     ) = buffer.a2e_irecv_two_stage(
+        #         hidden,
+        #         num_topk,
+        #         num_max_tokens,
+        #         num_experts,
+        #         use_fp8=use_fp8,
+        #     )
+        #     print(f"rank: {rank}, layer_idx: {layer_idx}, mb_idx: {mb_idx}, a2e_irecv", flush=True)
+        #     a2e_irecv_req.wait()
+        #     print(f"rank: {rank}, layer_idx: {layer_idx}, mb_idx: {mb_idx}, a2e_irecv wait", flush=True)
+        #     # else:
+        #     #     a2e_irecv_req.wait()
+        #     #     print(f"rank: {rank}, layer_idx: {layer_idx}, mb_idx: {mb_idx}, a2e_irecv wait", flush=True)
+            
+        #     # if idx < num_hidden_layers * num_micro_batches - 1:
+        #     #     (
+        #     #         packed_recv_x,
+        #     #         packed_recv_count,
+        #     #         rdma_send_flags,
+        #     #         handle,
+        #     #         event,
+        #     #         a2e_irecv_req,
+        #     #     ) = buffer.a2e_irecv_two_stage(
+        #     #         hidden,
+        #     #         num_topk,
+        #     #         num_max_tokens,
+        #     #         num_experts,
+        #     #         use_fp8=use_fp8,
+        #     #     )
+        #     #     print(f"rank: {rank}, layer_idx: {layer_idx}, mb_idx: {mb_idx}, a2e_irecv", flush=True)
 
-        for layer_idx in range(moe_layer_start_index, num_hidden_layers):
-            for mb_idx in range(num_micro_batches):
-                mb_idx_next = (mb_idx + 1) % num_micro_batches
-                # (
-                #     a2e_packed_recv_xs[mb_idx],
-                #     a2e_packed_recv_counts[mb_idx],
-                #     a2e_rdma_send_flagss[mb_idx],
-                #     a2e_handles[mb_idx],
-                #     event,
-                #     a2e_irecv_reqs[mb_idx],
-                # ) = buffer.a2e_irecv_two_stage(
-                #     hidden,
-                #     num_topk,
-                #     num_max_tokens,
-                #     num_experts,
-                #     use_fp8=use_fp8,
-                # )
-                # # paddle.device.synchronize()
-                # a2e_irecv_reqs[mb_idx].wait()
-                # moe(num_tokens, hidden)
-                # # paddle.device.synchronize()
-                # print(f"rank: {rank}, layer_idx: {layer_idx}, mb_idx: {mb_idx}, a2e_irecv +++", flush=True)
+        #     # e2a isend
+        #     if use_fp8:
+        #         simulated_gemm_x = per_token_cast_back(
+        #             packed_recv_x[0].view((-1, hidden)),
+        #             packed_recv_x[1].contiguous().view((-1, hidden // 128)),
+        #         ).view(packed_recv_x[0].shape)
+        #     else:
+        #         simulated_gemm_x = packed_recv_x.clone()
+        #     moe(num_tokens, hidden)
+        #     if idx < num_hidden_layers * num_micro_batches - num_micro_batches:
+        #         event, req = buffer.e2a_isend_two_stage(
+        #             simulated_gemm_x, 
+        #             num_topk,
+        #             handle,
+        #             dispatch_use_fp8=use_fp8,
+        #             out=None,
+        #         )
+        #         print(f"rank: {rank}, layer_idx: {layer_idx}, mb_idx: {mb_idx}, e2a_isend", flush=True)
+        #         # req.wait()
+        #         # print(f"rank: {rank}, layer_idx: {layer_idx}, mb_idx: {mb_idx}, e2a_isend wait", flush=True)
+        
+        (
+            packed_recv_x,
+            packed_recv_count,
+            rdma_send_flags,
+            handle,
+            event,
+            a2e_irecv_req,
+        ) = buffer.a2e_irecv_two_stage(
+            hidden,
+            num_topk,
+            num_max_tokens,
+            num_experts,
+            use_fp8=use_fp8,
+        )
+        print(f"rank: {rank}, a2e_irecv", flush=True)
+        a2e_irecv_req.wait()
+        print(f"rank: {rank}, a2e_irecv wait", flush=True)
+        (
+            packed_recv_x,
+            packed_recv_count,
+            rdma_send_flags,
+            handle,
+            event,
+            a2e_irecv_req,
+        ) = buffer.a2e_irecv_two_stage(
+            hidden,
+            num_topk,
+            num_max_tokens,
+            num_experts,
+            use_fp8=use_fp8,
+        )
+        print(f"rank: {rank}, a2e_irecv", flush=True)
+        moe(num_tokens, hidden)
+        print(f"rank: {rank}, 1_1", flush=True)
+        a2e_irecv_req.wait()
+        print(f"rank: {rank}, a2e_irecv wait", flush=True)
+        (
+            packed_recv_x,
+            packed_recv_count,
+            rdma_send_flags,
+            handle,
+            event,
+            a2e_irecv_req,
+        ) = buffer.a2e_irecv_two_stage(
+            hidden,
+            num_topk,
+            num_max_tokens,
+            num_experts,
+            use_fp8=use_fp8,
+        )
+        print(f"rank: {rank}, a2e_irecv", flush=True)
 
-
-                a2e_irecv_req_cur.wait()
-                paddle.device.synchronize()
-                print(f"rank: {rank}, layer_idx: {layer_idx}, mb_idx: {mb_idx}, a2e_irecv wait, packed_recv_count: {a2e_packed_recv_counts[mb_idx]}", flush=True)
-
-                if not (layer_idx == num_hidden_layers - 1 and mb_idx == num_micro_batches - 1):
-                    (
-                        a2e_packed_recv_xs[mb_idx_next],
-                        a2e_packed_recv_counts[mb_idx_next],
-                        a2e_rdma_send_flagss[mb_idx_next],
-                        a2e_handles[mb_idx_next],
-                        event,
-                        a2e_irecv_req_cur,
-                    ) = buffer.a2e_irecv_two_stage(
-                        hidden,
-                        num_topk,
-                        num_max_tokens,
-                        num_experts,
-                        use_fp8=use_fp8,
-                    )
-                    # paddle.device.synchronize()
-                    print(f"rank: {rank}, layer_idx: {layer_idx}, mb_idx: {mb_idx}, a2e_irecv +++", flush=True)
-
-                if use_fp8:
-                    simulated_gemm_x = per_token_cast_back(
-                        a2e_packed_recv_xs[mb_idx][0].view((-1, hidden)),
-                        a2e_packed_recv_xs[mb_idx][1].contiguous().view((-1, hidden // 128)),
-                    ).view(a2e_packed_recv_xs[mb_idx][0].shape)
-                else:
-                    simulated_gemm_x = a2e_packed_recv_xs[mb_idx].clone()
-
-                x = moe(num_tokens, hidden)
-                
-                # if layer_idx < num_hidden_layers - 1:
-                #     if e2a_isend_req is not None:
-                #         e2a_isend_req.wait()
-                #         print(f"rank: {rank}, layer_idx: {layer_idx}, mb_idx: {mb_idx}, e2a_isend wait", flush=True)
-                #     time.sleep(0.001)
-                #     event, e2a_isend_req = buffer.e2a_isend_two_stage(
-                #         simulated_gemm_x, 
-                #         num_topk,
-                #         a2e_handles[mb_idx],
-                #         dispatch_use_fp8=use_fp8,
-                #         out=None,
-                #     )
-                #     print(f"rank: {rank}, layer_idx: {layer_idx}, mb_idx: {mb_idx}, e2a_isend", flush=True)
+        moe(num_tokens, hidden)
+        print(f"rank: {rank}, 2_1", flush=True)
+        a2e_irecv_req.wait()
+        print(f"rank: {rank}, a2e_irecv wait", flush=True)
+        moe(num_tokens, hidden)
+        print(f"rank: {rank}, 2_1", flush=True)
 
     run_time = 1
     print("run_time: ", run_time)
@@ -298,7 +400,7 @@ def test_loop():
         num_max_tokens, hidden, num_ranks, a_num_ranks, e_num_ranks, num_experts, num_topk
     )
     
-    use_fp8 = True
+    use_fp8 = False
     num_nvl_bytes = deep_ep.M2NBuffer.get_low_latency_nvl_size_hint_two_stage(
         num_max_tokens, hidden, num_ranks, a_num_ranks, e_num_ranks, num_experts, num_topk, use_fp8
     )
