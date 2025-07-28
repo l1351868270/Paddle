@@ -893,7 +893,7 @@ __global__ __launch_bounds__(
       int self_num_iteration = (sm_id >= num_tokens_to_deal) ? 0 : (1 + (num_tokens_to_deal - sm_id - 1) / sms_per_rdma);
 
       alignas(16) __shared__ int4 shared_topk_info[kMaxNumTokensPerSm * kNumActualTopkDivFour];
-      __shared__ int4 shared_topknum[kMaxNumTokensPerSm];
+      __shared__ int shared_topknum[kMaxNumTokensPerSm];
       const auto compute_shared_topk_info_addr = [=](int idx_iteration, int idx_topkdivfour) {
         return shared_topk_info
             + idx_iteration * kNumActualTopkDivFour
@@ -921,8 +921,8 @@ __global__ __launch_bounds__(
         const int* nvl_rank_meta_now =
               nvl_rank_meta + rdma_rank * (kTopk * 3 + 1) + 1;
 
-        const int4* src_ptr = reinterpret_cast<const int4*>(nvl_rank_meta_now) + prepare_topk_idx_topkdivfour);
-        int* smem_addr = compute_shared_topk_info_addr(prepare_topk_idx_iteration, prepare_topk_idx_topkdivfour);
+        const int4* src_ptr = reinterpret_cast<const int4*>(nvl_rank_meta_now) + prepare_topk_idx_topkdivfour;
+        int4* smem_addr = compute_shared_topk_info_addr(prepare_topk_idx_iteration, prepare_topk_idx_topkdivfour);
         temp_buf = ld_nc_global(src_ptr);
         *smem_addr = temp_buf;
         shared_topknum[prepare_topk_idx_iteration] = *nvl_rank_meta_now;
