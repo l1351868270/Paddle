@@ -910,7 +910,7 @@ __global__ __launch_bounds__(
       }
 
       bool enable_prepare_topk = (warp_id == 0) && (prepare_topk_idx_iteration < self_num_iteration);
-      if (enable_prepare_topk) {{
+      if (enable_prepare_topk) {
         const int prepare_token_idx = sm_id + prepare_topk_idx_iteration * sms_per_rdma;
         const auto dispatch_rdma_recv_x_now =
             dispatch_rdma_recv_x_this_rdma_rank +
@@ -925,8 +925,7 @@ __global__ __launch_bounds__(
         int4* smem_addr = compute_shared_topk_info_addr(prepare_topk_idx_iteration, prepare_topk_idx_topkdivfour);
         temp_buf = ld_nc_global(src_ptr);
         *smem_addr = temp_buf;
-        shared_topknum[prepare_topk_idx_iteration] = *nvl_rank_meta_now;
-              
+        shared_topknum[prepare_topk_idx_iteration] = *nvl_rank_meta_now;       
       }
 
       __syncthreads();
@@ -972,13 +971,13 @@ __global__ __launch_bounds__(
                     num_bytes_per_slot);
             auto x_vec = ld_nc_global(src_ptr + thread_id);
             const auto x_bf16 = reinterpret_cast<nv_bfloat16*>(&x_vec);
-#pragma unroll
+            #pragma unroll
             for (int j = 0; j < kNumElemsPerInt4; ++j)
               combined_values[j] += static_cast<float>(x_bf16[j]) * topk_weight;
           }
           int4& combined_int4 = *reinterpret_cast<int4*>(combined_values);
           auto combined_bf16 = reinterpret_cast<nv_bfloat16*>(&combined_values);
-#pragma unroll
+          #pragma unroll
           for (int j = 0; j < kNumElemsPerInt4; ++j)
             combined_bf16[j] = static_cast<nv_bfloat16>(combined_values[j]);
           dst_ptr[thread_id] = combined_int4;
