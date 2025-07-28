@@ -11,20 +11,20 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+for name in `env | grep -E 'PADDLE|ENDPOINT' | awk -F"=" '{print $1}'`; do
+unset ${name}
+done
 
-from .buffer import Buffer
-from .buffer import M2NBuffer
-from .utils import (
-    EventOverlap,
-    get_event_from_calc_stream,
-    get_event_from_comm_stream,
-    get_event_from_custom_stream,
-)
+export LD_LIBRARY_PATH=/workspace/nvshmem/lib:${LD_LIBRARY_PATH}
+export NVSHMEM_BOOTSTRAP_UID_SOCK_IFNAME=eth0
+# export IP_LIST="10.94.130.150,10.94.130.151,10.94.130.152"
+export IP_LIST="10.94.130.151,10.94.130.152,10.94.130.153"
+export NCCL_DEBUG=WARN
 
-__all__ = [
-    "Buffer",
-    "EventOverlap",
-    "get_event_from_calc_stream",
-    "get_event_from_comm_stream",
-    "get_event_from_custom_stream",
-]
+export devices=0,1,2,3,4,5,6,7
+export start_port=6072
+python3.10 -m paddle.distributed.launch \
+        --gpus ${devices} \
+        --ips ${IP_LIST} \
+        --start_port ${start_port} \
+        test_m2n.py
