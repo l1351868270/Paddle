@@ -46,6 +46,7 @@ __global__ __launch_bounds__(
                             int* packed_rdma_recv_count,
                             bool* rdma_send_flags,  // kNumRdmaRanks
                             void* rdma_recv_x,
+                            void* rdma_recv_x_unit8_bak,
                             int* rdma_recv_count,
                             void* rdma_x,
                             void** nvl_recv_x,  // num_local_experts * dp_num *
@@ -368,6 +369,8 @@ __global__ __launch_bounds__(
            rdma_recv_token_idx += sms_per_rdma) {
         const auto rdma_recv_x_uint8_now =
             rdma_recv_x_uint8 + rdma_recv_token_idx * num_bytes_per_msg;
+        const auto rdma_recv_x_uint8_bak_now = 
+            rdma_recv_x_unit8_bak + rdma_recv_token_idx * num_bytes_per_msg;
         const auto src_data = reinterpret_cast<int4*>(rdma_recv_x_uint8_now);
         const auto rdma_recv_x_scales = reinterpret_cast<float*>(
             reinterpret_cast<uint8_t*>(src_data) + sizeof(int4) + hidden_bytes);
@@ -377,7 +380,16 @@ __global__ __launch_bounds__(
             *(rdma_recv_nvl_rank_meta + rdma_rank * (kTopk * 3 + 1));
         const auto rdma_recv_nvl_rank_meta_now =
             rdma_recv_nvl_rank_meta + rdma_rank * (kTopk * 3 + 1) + 1;
-
+        // Used in combine
+        if (warp_id == num_warps - 1) {
+          UNROLLED_WARP_COPY(UNROLL_FACTOR,
+                             lane_id,
+                             num_int4_per_msg,
+                             reinterpret_cast<int4*>(rdma_recv_x_uint8_bak_now),
+                             reinterpret_cast<int4*>(rdma_recv_x_uint8_now),
+                             ld_nc_global,
+                             st_na_global);
+        }
 
         // nvl sender
         for (int loop_nvl_expert_i = warp_id;
@@ -564,6 +576,7 @@ void dispatch(void* packed_recv_x,
               int* packed_rdma_recv_count,
               bool* rdma_send_flags,
               void* rdma_recv_x,
+              void* rdma_recv_x_unit8_bak
               int* rdma_recv_count,
               void* rdma_x,
               void** nvl_recv_x,
@@ -665,6 +678,7 @@ void dispatch(void* packed_recv_x,
                                   packed_rdma_recv_count,
                                   rdma_send_flags,
                                   rdma_recv_x,
+                                  rdma_recv_x_unit8_bak,
                                   rdma_recv_count,
                                   rdma_x,
                                   nvl_recv_x,

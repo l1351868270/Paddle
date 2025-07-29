@@ -417,6 +417,7 @@ struct Buffer {
              paddle::Tensor,
              paddle::Tensor,
              paddle::Tensor,
+             paddle::Tensor,
              std::optional<EventHandle>,
              std::optional<std::function<void()>>>
   low_latency_dispatch_two_stage_api(const paddle::Tensor& x,
@@ -438,6 +439,7 @@ struct Buffer {
       const paddle::Tensor& src_info,
       const paddle::Tensor& layout_range,
       const paddle::Tensor& rdma_send_flags,
+      const paddle::Tensor& dispatch_rdma_recv_x_unit8_bak,
       const paddle::Tensor& dispatch_rdma_recv_count,
       int num_max_dispatch_tokens_per_rank,
       int num_experts,
