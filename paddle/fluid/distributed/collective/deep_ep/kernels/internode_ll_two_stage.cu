@@ -686,7 +686,7 @@ void dispatch(void* packed_recv_x,
                   })})})})});
 }
 
-constexpr int kNumActualTopkDivFour = 3*kTopk+1;
+constexpr int kNumActualTopkDivFour = 3*8+1;
 constexpr int kMaxNumTokensPerSm = 10;
 
 template <int kNumWarpGroups,
