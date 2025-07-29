@@ -892,7 +892,7 @@ __global__ __launch_bounds__(
       // reduce
       int self_num_iteration = (sub_deal_rdma_rank >= num_tokens_to_deal) ? 0 : (1 + (num_tokens_to_deal - sub_deal_rdma_rank - 1) / sms_per_rdma);
 
-      EP_DEVICE_ASSERT(self_num_iteration <= kMaxNumTokensPerSm, "self_num_iteration <= kMaxNumTokensPerSm");
+      EP_DEVICE_ASSERT(self_num_iteration <= kMaxNumTokensPerSm);
       __shared__ int shared_topk_info[kMaxNumTokensPerSm * kNumActualTopkDivFour];
       const auto compute_shared_topk_info_addr = [=](int idx_iteration, int class_id, int idx_topkdivfour) {
         return shared_topk_info
@@ -902,7 +902,7 @@ __global__ __launch_bounds__(
 
       int temp_buf;
       int prepare_topk_idx_iteration, prepare_topk_idx_topkdivfour;
-      EP_DEVICE_ASSERT(num_threads > kNumActualTopkDivFour * self_num_iteration, "threadnum should be larger than kNumActualTopkDivFour * self_num_iteration");
+      EP_DEVICE_ASSERT(num_threads > kNumActualTopkDivFour * self_num_iteration);
       if (thread_id < kNumActualTopkDivFour * self_num_iteration) {
         int index = thread_id;
         prepare_topk_idx_topkdivfour = index % kNumActualTopkDivFour;
