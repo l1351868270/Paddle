@@ -1436,7 +1436,7 @@ class M2NBuffer(object):
             use_fp8,
         )
 
-    def a2e_send_two_stage(
+    def a2e_isend_two_stage_v2(
         self,
         x: paddle.Tensor,
         topk_idx: paddle.Tensor,
@@ -1479,7 +1479,7 @@ class M2NBuffer(object):
             M2NWorker(hook),
         ) 
 
-    def a2e_recv_two_stage(
+    def a2e_irecv_two_stage_v2(
         self,
         hidden: int,
         num_topk: int,
@@ -1538,7 +1538,7 @@ class M2NBuffer(object):
             M2NWorker(hook),
         ) 
 
-    def e2a_send_two_stage(
+    def e2a_isend_two_stage_v2(
         self,
         x: paddle.Tensor,
         num_topk: int,
@@ -1573,7 +1573,7 @@ class M2NBuffer(object):
         )
 
 
-    def e2a_recv_two_stage(
+    def e2a_irecv_two_stage_v2(
         self,
         topk_idx: paddle.Tensor,
         topk_weights: paddle.Tensor,

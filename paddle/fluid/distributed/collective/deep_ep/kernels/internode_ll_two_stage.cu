@@ -330,6 +330,19 @@ __global__ __launch_bounds__(
     }
   }
 
+  if (rdma_rank < 2) {
+    const int sms_per_rdma = num_sms / kNumRdmaRanks;
+    const int src_rdma_rank = sm_id / sms_per_rdma;
+    if (src_rdma_rank < kNumRdmaRanks) {
+      const int sub_rdma_rank = sm_id % sms_per_rdma;
+    }
+    for (int reset_i = thread_id; reset_i < kNumQPs;
+          reset_i += num_threads) {
+      rdma_recv_count[src_rdma_rank * kNumQPs + reset_i] = 0;
+    }
+    return;
+  }
+
   LOW_LATENCY_DISPATCH_RECV:
   if ((phases & LOW_LATENCY_RECV_PHASE) == 0) 
     return;
@@ -554,6 +567,36 @@ __global__ __launch_bounds__(
       }
     }
   }
+
+  // // Issue count sends
+  // if (sm_id < kNumRdmaRanks) {
+  //   int dst_rdma_rank = sm_id;
+  //   const auto num_tokens_sent =
+  //       atomic_finished_counter_per_rdma[dst_rdma_rank];
+
+  //   if (thread_id < kNumQPs) {
+  //     auto dst_ptr = reinterpret_cast<uint64_t>(
+  //         rdma_recv_count + rdma_rank * kNumQPs + thread_id);
+
+  //     bool is_local_copy = dst_rdma_rank == rdma_rank;
+  //     if (is_local_copy) {  // local copy
+  //       st_na_release(rdma_recv_count + rdma_rank * kNumQPs + thread_id,
+  //                     -num_tokens_sent - 1);
+  //     } else {
+  //       nvshmemi_ibgda_amo_nonfetch_add(
+  //           reinterpret_cast<int*>(dst_ptr),
+  //           -num_tokens_sent - 1,
+  //           dst_rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank,
+  //           thread_id);
+  //     }
+  //   }
+  //   __syncthreads();
+  //   // clean
+  //   if (thread_id == 0) {
+  //     atomic_counter_per_rdma[dst_rdma_rank] = 0;
+  //     atomic_finished_counter_per_rdma[dst_rdma_rank] = 0;
+  //   }
+  // }
 }
 
 void dispatch(void* packed_recv_x,
@@ -845,10 +888,6 @@ __global__ __launch_bounds__(
     __syncwarp();
   }
 
-  LOW_LATENCY_COMBINE_RECV:
-  if ((phases & LOW_LATENCY_RECV_PHASE) == 0)
-      return;
-
   // Wait all nvl ranks to arrive
   if (responsible_expert_idx < num_experts) {
     EP_STATIC_ASSERT(kNumWarpsPerGroup > 1,
@@ -1006,6 +1045,20 @@ __global__ __launch_bounds__(
       }
     }
   }
+
+  if (rdma_rank == 2) {
+      if (sm_id < kNumRdmaRanks) {
+        if (thread_id < kNumQPs) {
+          // reset
+          rdma_recv_flag[sm_id * kNumQPs + thread_id] = 0;
+        }
+    }
+    return;
+  }
+
+  LOW_LATENCY_COMBINE_RECV:
+  if ((phases & LOW_LATENCY_RECV_PHASE) == 0)
+      return;
 
   /* RDMA Receiver / RDMA Reducer */
   // Wait all rdma ranks to arrive
