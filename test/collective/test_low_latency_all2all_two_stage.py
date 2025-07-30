@@ -238,7 +238,7 @@ def test_loop():
     print("rank: ", rank, flush=True)
     print("num_ranks: ", num_ranks, flush=True)
 
-    num_tokens, hidden, num_topk, num_experts = 128, 8192, 8, 64
+    num_tokens, hidden, num_topk, num_experts = 128, 8192, 8, 192
     assert (
         num_tokens <= num_max_tokens
     ), "num_tokens must be less equal to num_max_tokens"

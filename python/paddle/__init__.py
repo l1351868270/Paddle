@@ -15,7 +15,7 @@
 import math
 import typing
 
-print("update paddle lzy")
+print("merge from lzy pr")
 
 __is_metainfo_generated = False
 try:

@@ -176,7 +176,7 @@ def test_main(
     ), 'Too many ranks (exceeding test precision limit)'
 
     x = paddle.ones((num_tokens, hidden), dtype="bfloat16") * (rank - rank_offset)
-    # x[:, -128:] = paddle.arange(0, num_tokens, dtype="bfloat16").view((-1, 1))
+    x[:, -128:] = paddle.arange(0, num_tokens, dtype="bfloat16").view((-1, 1))
     # x = paddle.randn((num_tokens, hidden), dtype="bfloat16")
     # x = paddle.ones((num_tokens, hidden), dtype="bfloat16") * 3
     topk_idx = paddle.randint(
@@ -379,7 +379,7 @@ def test_loop():
     # 64 * 3 / 32 = 6
     # 64 * 3 / 24 = 8
     # 64 * 3 / 12 = 16
-    num_tokens, hidden, num_topk, num_experts = 96, 8192, 8, 64
+    num_tokens, hidden, num_topk, num_experts = 96, 8192, 8, 24
 
     assert (
         num_tokens <= num_max_tokens

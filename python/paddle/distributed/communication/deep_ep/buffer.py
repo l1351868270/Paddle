@@ -1065,6 +1065,7 @@ class Buffer:
         (
             packed_recv_x,
             packed_recv_x_scales,
+            packed_recv_rdma_x,
             packed_recv_count,
             packed_rdma_recv_count,
             packed_recv_src_info,
@@ -1083,6 +1084,7 @@ class Buffer:
             return_recv_hook,
         )
         handle = (
+            packed_recv_rdma_x,
             packed_recv_src_info,
             packed_recv_layout_range,
             rdma_send_flags,
@@ -1097,6 +1099,7 @@ class Buffer:
             topk_weights,
             packed_recv_x,
             packed_recv_x_scales,
+            packed_recv_rdma_x,
             packed_recv_count,
             packed_rdma_recv_count,
             packed_recv_src_info,
@@ -1153,6 +1156,7 @@ class Buffer:
             hook: the receiving hook function (valid only if `return_recv_hook` is set).
         """
         (
+            packed_recv_rdma_x,
             src_info,
             layout_range,
             rdma_send_flags,
@@ -1163,6 +1167,7 @@ class Buffer:
         ) = handle
         combined_x, event, hook = self.runtime.low_latency_combine_two_stage(
             x,
+            packed_recv_rdma_x,
             topk_idx,
             topk_weights,
             src_info,
@@ -1178,6 +1183,7 @@ class Buffer:
         )
         tensors_to_record = (
             x,
+            packed_recv_rdma_x,
             topk_idx,
             topk_weights,
             src_info,
@@ -1361,7 +1367,11 @@ class M2NBuffer(object):
         dispatch_use_fp8: bool = False,
         out: paddle.Tensor | None = None,
     ) -> tuple[paddle.Tensor, EventOverlap, M2NWorker]:
+
+
+
         (
+            packed_recv_rdma_x,
             src_info,
             layout_range,
             rdma_send_flags,
@@ -1582,6 +1592,7 @@ class M2NBuffer(object):
         out: paddle.Tensor | None = None,
     ) -> tuple[paddle.Tensor, EventOverlap, M2NWorker]:
         (
+            packed_recv_rdma_x,
             src_info,
             layout_range,
             rdma_send_flags,
