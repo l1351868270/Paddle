@@ -1162,7 +1162,7 @@ void combine(void* combined_x,
   int num_warp_groups = cell_div(num_experts, sm_count);
   num_warp_groups = (num_warp_groups % 2 == 1) ? num_warp_groups + 1 : num_warp_groups;
   const auto num_sms = max(sm_count, cell_div(num_experts, num_warp_groups));
-  // const auto num_sms = 24;
+  // const auto num_sms = 24; 
   const int num_rdma_ranks = num_ranks / NUM_MAX_NVL_PEERS;
 
   // Check workspace
