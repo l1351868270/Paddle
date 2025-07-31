@@ -408,6 +408,7 @@ namespace m2n_ll_two_stage {
 
 void dispatch(void* packed_recv_x,
               float* packed_recv_x_scales,
+              void* packed_rdma_recv_x,
               int* packed_recv_src_info,
               int64_t* packed_recv_layout_range,
               int* packed_recv_count,
