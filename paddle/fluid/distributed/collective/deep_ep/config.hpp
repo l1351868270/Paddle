@@ -149,10 +149,12 @@ struct LowLatencyBuffer {
   void* dispatch_rdma_send_buffer = nullptr;
   void* dispatch_rdma_recv_data_buffer = nullptr;
   int* dispatch_rdma_recv_count_buffer = nullptr;
+  int* dispatch_rdma_recv_complete_buffer = nullptr;
 
   void* combine_rdma_send_buffer = nullptr;
   void* combine_rdma_recv_data_buffer = nullptr;
   int* combine_rdma_recv_flag_buffer = nullptr;
+  int* combine_rdma_recv_complete_buffer = nullptr;
 
   void* combine_rdma_send_buffer_data_start = nullptr;
   size_t num_bytes_per_combine_msg = 0;
@@ -233,6 +235,9 @@ struct LowLatencyLayout {
                                              combine_recv_flag_buffer_bytes);
     total_bytes += signaling_buffer_bytes * 2;
 
+    // Symmetric complete signaling buffers
+    size_t recv_complete_buffer_bytes = num_ranks * sizeof(int);
+
     // Assign pointers
     // NOTES: we still leave some space for distinguishing dispatch/combine
     // buffer, so you may see some parameters are duplicated
@@ -244,11 +249,17 @@ struct LowLatencyLayout {
           advance<int*>(rdma_buffer,
                         send_buffer_bytes * 2 + recv_buffer_bytes * 2 +
                             signaling_buffer_bytes * i),
+          advance<int*>(rdma_buffer,
+                        send_buffer_bytes * 2 + recv_buffer_bytes * 2 +
+                            signaling_buffer_bytes * 2 + recv_complete_buffer_bytes * i),
           advance(rdma_buffer, send_buffer_bytes * i),
           advance(rdma_buffer, send_buffer_bytes * 2 + recv_buffer_bytes * i),
           advance<int*>(rdma_buffer,
                         send_buffer_bytes * 2 + recv_buffer_bytes * 2 +
                             signaling_buffer_bytes * i),
+          advance<int*>(rdma_buffer,
+                        send_buffer_bytes * 2 + recv_buffer_bytes * 2 +
+                            signaling_buffer_bytes * 2 + recv_complete_buffer_bytes * i),
           advance(rdma_buffer, send_buffer_bytes * i),
           num_bytes_per_combine_msg};
     }
@@ -318,6 +329,9 @@ struct LowLatencyTwoStageLayout {
                                              combine_recv_flag_buffer_bytes);
     total_bytes += signaling_buffer_bytes * 2;
 
+    // Symmetric complete signaling buffers
+    size_t recv_complete_buffer_bytes = num_ranks * sizeof(int);
+
     // Assign pointers
     for (int i = 0; i < 2; ++i) {
       buffers[i] = {
@@ -327,11 +341,17 @@ struct LowLatencyTwoStageLayout {
           advance<int*>(rdma_buffer,
                         send_buffer_bytes * 2 + recv_buffer_bytes * 2 +
                             signaling_buffer_bytes * i),
+          advance<int*>(rdma_buffer,
+                        send_buffer_bytes * 2 + recv_buffer_bytes * 2 +
+                            signaling_buffer_bytes * 2 + recv_complete_buffer_bytes * i),
           advance(rdma_buffer, send_buffer_bytes * i),
           advance(rdma_buffer, send_buffer_bytes * 2 + recv_buffer_bytes * i),
           advance<int*>(rdma_buffer,
                         send_buffer_bytes * 2 + recv_buffer_bytes * 2 +
                             signaling_buffer_bytes * i),
+          advance<int*>(rdma_buffer,
+                        send_buffer_bytes * 2 + recv_buffer_bytes * 2 +
+                            signaling_buffer_bytes * 2 + recv_complete_buffer_bytes * i),
           advance(rdma_buffer, send_buffer_bytes * i),
           num_bytes_per_combine_msg};
     }

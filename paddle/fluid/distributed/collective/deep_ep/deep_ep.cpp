@@ -2252,6 +2252,10 @@ Buffer::m2n_low_latency_dispatch_two_stage(
     const deep_ep::detail::Tensor& topk_weights,
     int num_max_dispatch_tokens_per_rank,
     int num_experts,
+    int a_start_rank,
+    int a_num_ranks,
+    int e_start_rank,
+    int e_num_ranks,
     bool use_fp8,
     bool async,
     bool return_recv_hook) {
@@ -2357,6 +2361,7 @@ Buffer::m2n_low_latency_dispatch_two_stage(
         rdma_send_flags.data_ptr<bool>(),
         buffer.dispatch_rdma_recv_data_buffer,
         buffer.dispatch_rdma_recv_count_buffer,
+        buffer.dispatch_rdma_recv_complete_buffer,
         buffer.dispatch_rdma_send_buffer,
         buffer_ptrs_gpu,
         x.data_ptr(),
@@ -2371,6 +2376,10 @@ Buffer::m2n_low_latency_dispatch_two_stage(
         num_experts,
         rank,
         num_ranks,
+        a_start_rank,
+        a_num_ranks,
+        e_start_rank,
+        e_num_ranks,
         use_fp8,
         workspace,
         launch_stream,
@@ -2406,6 +2415,29 @@ Buffer::m2n_low_latency_dispatch_two_stage(
           rdma_send_flags,
           event,
           recv_hook};
+}
+
+std::tuple<std::optional<EventHandle>>
+Buffer::m2n_low_latency_dispatch_two_stage_wait(
+    int hidden,
+    int num_max_dispatch_tokens_per_rank,
+    int num_experts,
+    int num_topk,
+    int a_start_rank,
+    int a_num_ranks,
+    int e_start_rank,
+    int e_num_ranks) {
+  // Buffer control
+  LowLatencyTwoStageLayout layout(rdma_buffer_ptr,
+                                  num_max_dispatch_tokens_per_rank,
+                                  hidden,
+                                  num_ranks,
+                                  num_experts,
+                                  num_topk);
+  EP_HOST_ASSERT(layout.total_bytes <= num_rdma_bytes);
+  // fixed buffer, 0 for dispatch, 1 for combine
+  auto buffer = layout.buffers[0];
+  auto next_buffer = layout.buffers[1];
 }
 
 std::tuple<deep_ep::detail::Tensor,
@@ -3010,6 +3042,10 @@ Buffer::m2n_low_latency_dispatch_two_stage_api(const paddle::Tensor& x,
                                            const paddle::Tensor& topk_weights,
                                            int num_max_dispatch_tokens_per_rank,
                                            int num_experts,
+                                           int a_start_rank,
+                                           int a_num_ranks,
+                                           int e_start_rank,
+                                           int e_num_ranks,
                                            bool use_fp8,
                                            bool async,
                                            bool return_recv_hook) {
@@ -3023,6 +3059,10 @@ Buffer::m2n_low_latency_dispatch_two_stage_api(const paddle::Tensor& x,
                                             topk_weights_,
                                             num_max_dispatch_tokens_per_rank,
                                             num_experts,
+                                            a_start_rank,
+                                            a_num_ranks,
+                                            e_start_rank,
+                                            e_num_ranks,
                                             use_fp8,
                                             async,
                                             return_recv_hook);
