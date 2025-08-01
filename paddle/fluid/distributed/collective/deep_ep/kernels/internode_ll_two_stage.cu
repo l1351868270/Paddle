@@ -641,6 +641,7 @@ void dispatch(void* packed_recv_x,
   EP_HOST_ASSERT(num_topk <= kNumMaxTopK);
   const int num_rdma_ranks = num_ranks / NUM_MAX_NVL_PEERS;
   const int num_rdma_experts = num_experts / num_rdma_ranks;
+
   // Workspace checks
   auto atomic_counter_per_expert = reinterpret_cast<int*>(workspace);
   auto atomic_counter_per_rdma = atomic_counter_per_expert + num_experts;
@@ -728,6 +729,9 @@ void dispatch(void* packed_recv_x,
                                   phases);
                   })})})})});
 }
+
+constexpr int kNumActualTopkDivFour = 3*8+1;
+constexpr int kMaxNumTokensPerSm = 10;
 
 template <int kNumWarpGroups,
           int kNumWarpsPerGroup,
@@ -926,9 +930,43 @@ __global__ __launch_bounds__(
           deal_rdma_rank * num_max_dispatch_tokens_per_rank *
               combine_hidden_bytes;
       // reduce
-      for (int rdma_recv_token_idx = sub_deal_rdma_rank;
+      int self_num_iteration = (sub_deal_rdma_rank >= num_tokens_to_deal) ? 0 : (1 + (num_tokens_to_deal - sub_deal_rdma_rank - 1) / sms_per_rdma);
+
+      EP_DEVICE_ASSERT(self_num_iteration <= kMaxNumTokensPerSm);
+      __shared__ int shared_topk_info[kMaxNumTokensPerSm * kNumActualTopkDivFour];
+      const auto compute_shared_topk_info_addr = [=](int idx_iteration, int class_id, int idx_topkdivfour) {
+        return shared_topk_info
+            + idx_iteration * kNumActualTopkDivFour
+            + idx_topkdivfour;
+      };
+
+      int temp_buf;
+      int prepare_topk_idx_iteration, prepare_topk_idx_topkdivfour;
+      EP_DEVICE_ASSERT(num_threads > kNumActualTopkDivFour * self_num_iteration);
+      if (thread_id < kNumActualTopkDivFour * self_num_iteration) {
+        int index = thread_id;
+        prepare_topk_idx_topkdivfour = index % kNumActualTopkDivFour;
+        index /= kNumActualTopkDivFour;
+        prepare_topk_idx_iteration = index;
+      
+        const int prepare_token_idx = sub_deal_rdma_rank + prepare_topk_idx_iteration * sms_per_rdma;
+        const auto dispatch_rdma_recv_x_now =
+            dispatch_rdma_recv_x_this_rdma_rank +
+            prepare_token_idx * num_bytes_per_msg_dispatch;
+        const int* nvl_rank_meta = reinterpret_cast<const int*>(
+              dispatch_rdma_recv_x_now + sizeof(int4) + dispatch_hidden_bytes +
+              (kDispatchUseFP8 ? kNumScales * sizeof(float) : 0));
+        const int* nvl_rank_meta_now =
+              nvl_rank_meta + rdma_rank * (kTopk * 3 + 1);
+
+        shared_topk_info[thread_id] = ld_nc_global(nvl_rank_meta_now + prepare_topk_idx_topkdivfour);      
+      }
+
+      __syncthreads();
+
+      for (int rdma_recv_token_idx = sub_deal_rdma_rank, iteration = 0;
            rdma_recv_token_idx < num_tokens_to_deal;
-           rdma_recv_token_idx += sms_per_rdma) {
+           rdma_recv_token_idx += sms_per_rdma, iteration++) {
         const auto dispatch_rdma_recv_x_now =
             dispatch_rdma_recv_x_this_rdma_rank +
             rdma_recv_token_idx * num_bytes_per_msg_dispatch;
@@ -937,13 +975,16 @@ __global__ __launch_bounds__(
         const int* nvl_rank_meta = reinterpret_cast<const int*>(
             dispatch_rdma_recv_x_now + sizeof(int4) + dispatch_hidden_bytes +
             (kDispatchUseFP8 ? kNumScales * sizeof(float) : 0));
-        const int nvl_rank_nums =
-            *(nvl_rank_meta + rdma_rank * (kTopk * 3 + 1));
-        const int* nvl_rank_meta_now =
-            nvl_rank_meta + rdma_rank * (kTopk * 3 + 1) + 1;
+        
         int4* dst_ptr = reinterpret_cast<int4*>(
             rdma_send_x_this_rdma_rank + index_source * combine_hidden_bytes);
         float combined_values[kNumElemsPerInt4] = {0.0f};
+
+
+        const int* nvl_rank_meta_shared = shared_topk_info + iteration * kNumActualTopkDivFour;
+        const int nvl_rank_nums = nvl_rank_meta_shared[0];
+        const int* nvl_rank_meta_now = nvl_rank_meta_shared + 1;        
+         
         for (int g_id = thread_id; g_id < hidden_bf16_int4;
              g_id += num_threads) {
           for (int nvl_rank_idx = 0; nvl_rank_idx < nvl_rank_nums;
@@ -961,13 +1002,13 @@ __global__ __launch_bounds__(
                     num_bytes_per_slot);
             auto x_vec = ld_nc_global(src_ptr + g_id);
             const auto x_bf16 = reinterpret_cast<nv_bfloat16*>(&x_vec);
-#pragma unroll
+            #pragma unroll
             for (int j = 0; j < kNumElemsPerInt4; ++j)
               combined_values[j] += static_cast<float>(x_bf16[j]) * topk_weight;
           }
           int4& combined_int4 = *reinterpret_cast<int4*>(combined_values);
           auto combined_bf16 = reinterpret_cast<nv_bfloat16*>(&combined_values);
-#pragma unroll
+          #pragma unroll
           for (int j = 0; j < kNumElemsPerInt4; ++j)
             combined_bf16[j] = static_cast<nv_bfloat16>(combined_values[j]);
           dst_ptr[g_id] = combined_int4;
@@ -1088,7 +1129,7 @@ __global__ __launch_bounds__(
                   combine_hidden_bytes);
           auto x_vec = ld_nc_global(src_ptr + g_id);
           const auto x_bf16 = reinterpret_cast<nv_bfloat16*>(&x_vec);
-#pragma unroll
+          #pragma unroll
           for (int j = 0; j < kNumElemsPerInt4; ++j)
             combined_values[j] += static_cast<float>(x_bf16[j]);
         }
@@ -1096,7 +1137,7 @@ __global__ __launch_bounds__(
       // Write results
       int4& combined_int4 = *reinterpret_cast<int4*>(combined_values);
       auto combined_bf16 = reinterpret_cast<nv_bfloat16*>(&combined_values);
-#pragma unroll
+      #pragma unroll
       for (int j = 0; j < kNumElemsPerInt4; ++j)
         combined_bf16[j] = static_cast<nv_bfloat16>(combined_values[j]);
       (reinterpret_cast<int4*>(combined_x) +
