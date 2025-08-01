@@ -1619,6 +1619,8 @@ class M2NBuffer(object):
             use_fp8,
         )
 
+
+
     def a2e_isend_two_stage_v2(
         self,
         x: paddle.Tensor,
@@ -1787,6 +1789,183 @@ class M2NBuffer(object):
             async_finish=True,
             dispatch_use_fp8=dispatch_use_fp8,
             return_recv_hook=False,
+            out=out,
+        )
+
+        return (
+            combined_x,
+            event,
+            M2NWorker(hook),
+        )
+
+    def a2e_isend_two_stage_v3(
+        self,
+        x: paddle.Tensor,
+        topk_idx: paddle.Tensor,
+        topk_weights: paddle.Tensor,
+        num_max_dispatch_tokens_per_rank: int,
+        num_experts: int,
+        use_fp8: bool = True,
+    ) -> tuple[
+        tuple[paddle.Tensor, paddle.Tensor],
+        tuple,
+        EventOverlap,
+        M2NWorker,
+    ]:
+        assert num_experts % self.e_num_ranks == 0
+        m2n_topk_idx = topk_idx + self.e_start_rank * (num_experts // self.e_num_ranks)
+        m2n_num_experts = (num_experts // self.e_num_ranks) * (self.a_num_ranks + self.e_num_ranks)
+        
+        (
+            packed_recv_x,
+            _,
+            _,
+            handle,
+            event,
+            hook,
+        ) = self.all2all_buffer.m2n_low_latency_dispatch_two_stage(
+            x,
+            m2n_topk_idx,
+            topk_weights,
+            num_max_dispatch_tokens_per_rank,
+            m2n_num_experts,
+            use_fp8,
+            async_finish = True,
+            return_recv_hook = True,
+        )
+
+        return (
+            packed_recv_x,
+            handle,
+            event,
+            M2NWorker(hook),
+        ) 
+
+    def a2e_irecv_two_stage_v3(
+        self,
+        hidden: int,
+        num_topk: int,
+        num_max_dispatch_tokens_per_rank: int,
+        num_experts: int,
+        use_fp8: bool = True,
+    ) -> tuple[
+        tuple[paddle.Tensor, paddle.Tensor],
+        paddle.Tensor,
+        tuple,
+        EventOverlap,
+        M2NWorker,
+    ]:
+        x = paddle.empty(
+            (0, hidden), 
+            dtype="bfloat16"
+        )
+
+        topk_idx = paddle.empty(
+            (0, num_topk),
+            dtype='int64',
+        )
+
+        topk_weights = paddle.empty(
+            (0, num_topk), 
+            dtype="float32",
+        )
+
+        assert num_experts % self.e_num_ranks == 0
+        m2n_num_experts = (num_experts // self.e_num_ranks)  * (self.a_num_ranks + self.e_num_ranks)
+
+        (
+            packed_recv_x,
+            packed_recv_count,
+            rdma_send_flags,
+            handle,
+            event,
+            hook,
+        ) = self.all2all_buffer.m2n_low_latency_dispatch_two_stage(
+            x,
+            topk_idx,
+            topk_weights,
+            num_max_dispatch_tokens_per_rank,
+            m2n_num_experts,
+            use_fp8,
+            async_finish = True,
+            return_recv_hook = True,
+        )
+
+        return (
+            packed_recv_x,
+            packed_recv_count,
+            rdma_send_flags,
+            handle,
+            event,
+            M2NWorker(hook),
+        ) 
+
+    def e2a_isend_two_stage_v3(
+        self,
+        x: paddle.Tensor,
+        num_topk: int,
+        handle: tuple,
+        dispatch_use_fp8: bool = False,
+        out: paddle.Tensor | None = None,
+    ) -> tuple[EventOverlap, M2NWorker]:
+        topk_idx = paddle.empty(
+            (0, num_topk),
+            dtype='int64',
+        )
+
+        topk_weights = paddle.empty(
+            (0, num_topk), 
+            dtype="float32",
+        )
+
+        _, event, hook = self.all2all_buffer.m2n_low_latency_combine_two_stage(
+            x,
+            topk_idx,
+            topk_weights,
+            handle,
+            async_finish=True,
+            dispatch_use_fp8=dispatch_use_fp8,
+            return_recv_hook=True,
+            out=out,
+        )
+
+        return (
+            event, 
+            M2NWorker(hook),
+        )
+
+
+    def e2a_irecv_two_stage_v3(
+        self,
+        topk_idx: paddle.Tensor,
+        topk_weights: paddle.Tensor,
+        handle: tuple,
+        dispatch_use_fp8: bool = False,
+        out: paddle.Tensor | None = None,
+    ) -> tuple[paddle.Tensor, EventOverlap, M2NWorker]:
+        (
+            src_info,
+            layout_range,
+            rdma_send_flags,
+            packed_rdma_recv_count,
+            num_max_dispatch_tokens_per_rank,
+            hidden,
+            m2n_num_experts,
+        ) = handle
+        m2n_num_ranks = self.a_num_ranks + self.e_num_ranks
+        m2n_topk_idx = topk_idx + self.e_start_rank * (m2n_num_experts // m2n_num_ranks)
+        
+        # TODO: only pass the check, this is not needed
+        x = paddle.empty((m2n_num_experts // m2n_num_ranks,  m2n_num_ranks * num_max_dispatch_tokens_per_rank, hidden),
+                         dtype="bfloat16")
+        combined_x, event, hook = self.all2all_buffer.m2n_low_latency_combine_two_stage(
+            x,
+            m2n_topk_idx,
+            topk_weights,
+            handle,
+            async_finish=True,
+            dispatch_use_fp8=dispatch_use_fp8,
+            return_recv_hook=True,
             out=out,
         )
 

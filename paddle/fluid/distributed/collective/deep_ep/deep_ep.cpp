@@ -2245,7 +2245,7 @@ std::tuple<deep_ep::detail::Tensor,
            deep_ep::detail::Tensor,
            deep_ep::detail::Tensor,
            std::optional<EventHandle>,
-           std::optional<std::function<void()>>>
+           std::optional<std::function<EventHandle()>>>
 Buffer::m2n_low_latency_dispatch_two_stage(
     const deep_ep::detail::Tensor& x,
     const deep_ep::detail::Tensor& topk_idx,
@@ -2286,10 +2286,14 @@ Buffer::m2n_low_latency_dispatch_two_stage(
 
   // Wait previous tasks to be finished
   // NOTES: the hook mode will always use the default stream
+  // auto compute_stream = calc_ctx->stream();
+  // auto launch_stream = return_recv_hook ? compute_stream : comm_stream;
+  // EP_HOST_ASSERT(!(async && return_recv_hook));
+  // if (!return_recv_hook) stream_wait(launch_stream, compute_stream);
+
   auto compute_stream = calc_ctx->stream();
-  auto launch_stream = return_recv_hook ? compute_stream : comm_stream;
-  EP_HOST_ASSERT(!(async && return_recv_hook));
-  if (!return_recv_hook) stream_wait(launch_stream, compute_stream);
+  auto launch_stream = comm_stream;
+  // stream_wait(launch_stream, compute_stream);
 
   auto return_x_dtype = phi::DataType::BFLOAT16;
   if (use_fp8) {
@@ -2383,19 +2387,30 @@ Buffer::m2n_low_latency_dispatch_two_stage(
             : (LOW_LATENCY_SEND_PHASE | LOW_LATENCY_RECV_PHASE));
 
   // Wait streams
+  // std::optional<EventHandle> event;
+  // if (async) {
+  //   // NOTES: we must ensure the all tensors will not be deallocated before the
+  //   // stream-wait happens, so in Python API, we must wrap all tensors into the
+  //   // event handle.
+  //   event = EventHandle(launch_stream);
+  // } else if (!return_recv_hook) {
+  //   stream_wait(compute_stream, launch_stream);
+  // }
+
   std::optional<EventHandle> event;
   if (async) {
     // NOTES: we must ensure the all tensors will not be deallocated before the
     // stream-wait happens, so in Python API, we must wrap all tensors into the
     // event handle.
     event = EventHandle(launch_stream);
-  } else if (!return_recv_hook) {
-    stream_wait(compute_stream, launch_stream);
   }
+  // stream_wait(launch_stream, compute_stream);
 
   // Receiver callback
-  std::optional<std::function<void()>> recv_hook = std::nullopt;
-  if (return_recv_hook) recv_hook = [=]() { launcher(LOW_LATENCY_RECV_PHASE); }; 
+  std::optional<std::function<EventHandle()>> recv_hook = std::nullopt;
+  if (return_recv_hook) recv_hook = [=]() { 
+    launcher(LOW_LATENCY_RECV_PHASE); 
+    return EventHandle(launch_stream);}; 
 
   return {packed_recv_x,
           packed_recv_x_scales,
@@ -2410,7 +2425,7 @@ Buffer::m2n_low_latency_dispatch_two_stage(
 
 std::tuple<deep_ep::detail::Tensor,
            std::optional<EventHandle>,
-           std::optional<std::function<void()>>>
+           std::optional<std::function<EventHandle()>>>
 Buffer::m2n_low_latency_combine_two_stage(
     const deep_ep::detail::Tensor& x,
     const deep_ep::detail::Tensor& topk_idx,
@@ -2467,10 +2482,14 @@ Buffer::m2n_low_latency_combine_two_stage(
 
   // Wait previous tasks to be finished
   // NOTES: the hook mode will always use the default stream
+  // auto compute_stream = calc_ctx->stream();
+  // auto launch_stream = return_recv_hook ? compute_stream : comm_stream;
+  // EP_HOST_ASSERT(!(async && return_recv_hook));
+  // if (!return_recv_hook) stream_wait(launch_stream, compute_stream);
+
   auto compute_stream = calc_ctx->stream();
-  auto launch_stream = return_recv_hook ? compute_stream : comm_stream;
-  EP_HOST_ASSERT(!(async && return_recv_hook));
-  if (!return_recv_hook) stream_wait(launch_stream, compute_stream);
+  auto launch_stream = comm_stream;
+  // stream_wait(launch_stream, compute_stream);
 
   // Allocate output tensor
   deep_ep::detail::Tensor combined_x;
@@ -2522,19 +2541,30 @@ Buffer::m2n_low_latency_combine_two_stage(
               : (LOW_LATENCY_SEND_PHASE | LOW_LATENCY_RECV_PHASE));
 
   // Wait streams
+  // std::optional<EventHandle> event;
+  // if (async) {
+  //   // NOTES: we must ensure the all tensors will not be deallocated before the
+  //   // stream-wait happens, so in Python API, we must wrap all tensors into the
+  //   // event handle.
+  //   event = EventHandle(launch_stream);
+  // } else if (!return_recv_hook) {
+  //   stream_wait(compute_stream, launch_stream);
+  // }
+
   std::optional<EventHandle> event;
   if (async) {
     // NOTES: we must ensure the all tensors will not be deallocated before the
     // stream-wait happens, so in Python API, we must wrap all tensors into the
     // event handle.
     event = EventHandle(launch_stream);
-  } else if (!return_recv_hook) {
-    stream_wait(compute_stream, launch_stream);
-  }
+  } 
+  // stream_wait(launch_stream, compute_stream);
 
   // Receiver callback
-  std::optional<std::function<void()>> recv_hook = std::nullopt;
-  if (return_recv_hook) recv_hook = [=]() { launcher(LOW_LATENCY_RECV_PHASE); };
+  std::optional<std::function<EventHandle()>> recv_hook = std::nullopt;
+  if (return_recv_hook) recv_hook = [=]() { 
+    launcher(LOW_LATENCY_RECV_PHASE); 
+    return EventHandle(launch_stream);};
 
   // Return values
   return {combined_x, event, recv_hook};
@@ -3004,7 +3034,7 @@ std::tuple<paddle::Tensor,
            paddle::Tensor,
            paddle::Tensor,
            std::optional<EventHandle>,
-           std::optional<std::function<void()>>>
+           std::optional<std::function<EventHandle()>>>
 Buffer::m2n_low_latency_dispatch_two_stage_api(const paddle::Tensor& x,
                                            const paddle::Tensor& topk_idx,
                                            const paddle::Tensor& topk_weights,
@@ -3065,7 +3095,7 @@ Buffer::m2n_low_latency_dispatch_two_stage_api(const paddle::Tensor& x,
 
 std::tuple<paddle::Tensor,
            std::optional<EventHandle>,
-           std::optional<std::function<void()>>>
+           std::optional<std::function<EventHandle()>>>
 Buffer::m2n_low_latency_combine_two_stage_api(
     const paddle::Tensor& x,
     const paddle::Tensor& topk_idx,
