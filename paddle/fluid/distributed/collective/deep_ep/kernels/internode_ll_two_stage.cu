@@ -598,6 +598,8 @@ void dispatch(void* packed_recv_x,
   EP_HOST_ASSERT(num_topk <= kNumMaxTopK);
   const int num_rdma_ranks = num_ranks / NUM_MAX_NVL_PEERS;
   const int num_rdma_experts = num_experts / num_rdma_ranks;
+
+  printf("num_experts: %d, num_rdma_ranks: %d, num_rdma_experts: %d, num_warp_groups: %d, num_sms: %d, sm_count: %d\n", num_experts, num_rdma_ranks, num_rdma_experts, num_warp_groups, num_sms, sm_count);
   // Workspace checks
   auto atomic_counter_per_expert = reinterpret_cast<int*>(workspace);
   auto atomic_counter_per_rdma = atomic_counter_per_expert + num_experts;
