@@ -2280,9 +2280,21 @@ Buffer::m2n_low_latency_dispatch_two_stage(
                                   num_experts,
                                   num_topk);
   EP_HOST_ASSERT(layout.total_bytes <= num_rdma_bytes);
+  auto current_m2n_low_latency_hyper_dispatch_buffer_idx = m2n_low_latency_hyper_dispatch_buffer_idx;
   // fixed buffer, 0 for dispatch, 1 for combine
   auto buffer = layout.buffers[0];
   auto next_buffer = layout.buffers[1];
+  if (m2n_low_latency_hyper_dispatch_buffer_idx == 1) {
+    // fixed buffer, 0 for dispatch, 1 for combine
+    buffer = layout.buffers_1[0];
+    next_buffer = layout.buffers_1[1];
+  } else if (m2n_low_latency_hyper_dispatch_buffer_idx == 2) {
+    // fixed buffer, 0 for dispatch, 1 for combine
+    buffer = layout.buffers_2[0];
+    next_buffer = layout.buffers_2[1];
+  }
+  m2n_low_latency_hyper_dispatch_buffer_idx = (m2n_low_latency_hyper_dispatch_buffer_idx + 1) % 3;
+
 
   // Wait previous tasks to be finished
   // NOTES: the hook mode will always use the default stream
@@ -2374,7 +2386,8 @@ Buffer::m2n_low_latency_dispatch_two_stage(
         use_fp8,
         workspace,
         launch_stream,
-        phases);
+        phases,
+        current_m2n_low_latency_hyper_dispatch_buffer_idx);
   };
 
   // TODO(Zhenyu Li): supports async/return_recv_hook
@@ -2460,10 +2473,23 @@ Buffer::m2n_low_latency_combine_two_stage(
                                   num_experts,
                                   num_topk);
   EP_HOST_ASSERT(layout.total_bytes <= num_rdma_bytes);
+  auto current_m2n_low_latency_hyper_combine_buffer_idx = m2n_low_latency_hyper_combine_buffer_idx;
   // fixed buffer, 0 for dispatch, 1 for combine
   auto dispatch_buffer = layout.buffers[0];
   auto buffer = layout.buffers[1];
   auto next_buffer = layout.buffers[0];
+  if (m2n_low_latency_hyper_combine_buffer_idx == 1) {
+    // fixed buffer, 0 for dispatch, 1 for combine
+    dispatch_buffer = layout.buffers_1[0];
+    buffer = layout.buffers_1[1];
+    next_buffer = layout.buffers_1[0];
+  } else if (m2n_low_latency_hyper_combine_buffer_idx == 2) {
+    // fixed buffer, 0 for dispatch, 1 for combine
+    dispatch_buffer = layout.buffers_2[0];
+    buffer = layout.buffers_2[1];
+    next_buffer = layout.buffers_2[0];
+  }
+  m2n_low_latency_hyper_combine_buffer_idx = (m2n_low_latency_hyper_combine_buffer_idx + 1) % 3;
 
   // Wait previous tasks to be finished
   // NOTES: the hook mode will always use the default stream
@@ -2514,7 +2540,8 @@ Buffer::m2n_low_latency_combine_two_stage(
         workspace,
         launch_stream,
         phases,
-        dispatch_use_fp8);
+        dispatch_use_fp8,
+        current_m2n_low_latency_hyper_combine_buffer_idx);
   };
   // TODO(Zhenyu Li): supports async/return_recv_hook
   launcher(return_recv_hook

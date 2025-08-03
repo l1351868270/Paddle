@@ -258,6 +258,8 @@ struct LowLatencyLayout {
 struct LowLatencyTwoStageLayout {
   size_t total_bytes = 0;
   LowLatencyBuffer buffers[2];
+  LowLatencyBuffer buffers_1[2];
+  LowLatencyBuffer buffers_2[2];
 
   template <typename out_ptr_t = void*,
             typename count_ptr_t = uint8_t*,
@@ -335,6 +337,43 @@ struct LowLatencyTwoStageLayout {
           advance(rdma_buffer, send_buffer_bytes * i),
           num_bytes_per_combine_msg};
     }
+
+        // Assign pointers
+    for (int i = 0; i < 2; ++i) {
+      buffers_1[i] = {
+          static_cast<int>(signaling_buffer_bytes / sizeof(int)),
+          advance(rdma_buffer, total_bytes + send_buffer_bytes * i),
+          advance(rdma_buffer, total_bytes + send_buffer_bytes * 2 + recv_buffer_bytes * i),
+          advance<int*>(rdma_buffer,
+                        total_bytes + send_buffer_bytes * 2 + recv_buffer_bytes * 2 +
+                            signaling_buffer_bytes * i),
+          advance(rdma_buffer, total_bytes + send_buffer_bytes * i),
+          advance(rdma_buffer, total_bytes + send_buffer_bytes * 2 + recv_buffer_bytes * i),
+          advance<int*>(rdma_buffer,
+                        total_bytes + send_buffer_bytes * 2 + recv_buffer_bytes * 2 +
+                            signaling_buffer_bytes * i),
+          advance(rdma_buffer, total_bytes + send_buffer_bytes * i),
+          num_bytes_per_combine_msg};
+    }
+
+    for (int i = 0; i < 2; ++i) {
+      buffers_2[i] = {
+          static_cast<int>(signaling_buffer_bytes / sizeof(int)),
+          advance(rdma_buffer, 2 * total_bytes + send_buffer_bytes * i),
+          advance(rdma_buffer, 2 * total_bytes + send_buffer_bytes * 2 + recv_buffer_bytes * i),
+          advance<int*>(rdma_buffer,
+                        2 * total_bytes + send_buffer_bytes * 2 + recv_buffer_bytes * 2 +
+                            signaling_buffer_bytes * i),
+          advance(rdma_buffer, 2 * total_bytes + send_buffer_bytes * i),
+          advance(rdma_buffer, 2 * total_bytes + send_buffer_bytes * 2 + recv_buffer_bytes * i),
+          advance<int*>(rdma_buffer,
+                        2 * total_bytes + send_buffer_bytes * 2 + recv_buffer_bytes * 2 +
+                            signaling_buffer_bytes * i),
+          advance(rdma_buffer, 2 * total_bytes + send_buffer_bytes * i),
+          num_bytes_per_combine_msg};
+    }
+
+    total_bytes *= 3;
   }
 };
 
@@ -397,9 +436,11 @@ inline size_t get_low_latency_nvl_size_hint_two_stage(
   const size_t signal_bytes = num_local_experts * num_ranks * sizeof(int);
   auto nvl_num_bytes = dispatch_nvl_num_bytes + signal_bytes +
                        combine_nvl_num_bytes + signal_bytes;
-  return ((nvl_num_bytes + NUM_BUFFER_ALIGNMENT_BYTES - 1) /
+  nvl_num_bytes = ((nvl_num_bytes + NUM_BUFFER_ALIGNMENT_BYTES - 1) /
           NUM_BUFFER_ALIGNMENT_BYTES) *
          NUM_BUFFER_ALIGNMENT_BYTES;
+  nvl_num_bytes *= 3;
+  return nvl_num_bytes;
 }
 
 }  // namespace deep_ep

@@ -65,7 +65,8 @@ __global__ __launch_bounds__(
                             int num_tokens,
                             int num_max_dispatch_tokens_per_rank,
                             int rank,
-                            int phases) {
+                            int phases,
+                            int hyper_dispatch_buffer_idx) {
   constexpr int UNROLL_FACTOR = kHidden / 1024;
   constexpr int kNumRanks = kNumRdmaRanks * NUM_MAX_NVL_PEERS;
   constexpr int kNumLocalExperts = kNumExperts / kNumRanks;
@@ -111,9 +112,27 @@ __global__ __launch_bounds__(
   const size_t num_bytes_per_msg_rdma_revecier_and_nvl_sender =
       sizeof(int4) + (kUseFP8 ? (kHidden + kNumScales * sizeof(float))
                               : (kHidden * sizeof(nv_bfloat16)));
-  const size_t NVL_BUFFER_X_BYTES =
+  constexpr size_t combine_num_bytes_per_msg = kHidden * sizeof(nv_bfloat16);
+  const size_t DISPATCH_NVL_BUFFER_X_BYTES =
       kNumLocalExperts * kNumRanks * num_max_dispatch_tokens_per_rank *
       num_bytes_per_msg_rdma_revecier_and_nvl_sender;
+  const size_t COMBINE_NVL_BUFFER_X_BYTES = kNumRdmaExperts * kNumRdmaRanks *
+                                            num_max_dispatch_tokens_per_rank *
+                                            combine_num_bytes_per_msg;
+  const size_t NVL_MAX_BUFFER_X_BYTES =
+      ((DISPATCH_NVL_BUFFER_X_BYTES > COMBINE_NVL_BUFFER_X_BYTES
+            ? DISPATCH_NVL_BUFFER_X_BYTES
+            : COMBINE_NVL_BUFFER_X_BYTES) +
+       NUM_BUFFER_ALIGNMENT_BYTES - 1) /
+      NUM_BUFFER_ALIGNMENT_BYTES * NUM_BUFFER_ALIGNMENT_BYTES;
+  constexpr size_t SIGNAL_BYTES = (kNumLocalExperts * kNumRanks * sizeof(int) +
+                                   NUM_BUFFER_ALIGNMENT_BYTES - 1) /
+                                  NUM_BUFFER_ALIGNMENT_BYTES *
+                                  NUM_BUFFER_ALIGNMENT_BYTES;
+  const size_t NVL_BUFFER_X_BYTES_PER_BUFFER =
+      NVL_MAX_BUFFER_X_BYTES + SIGNAL_BYTES;
+  const size_t NVL_BUFFER_OFFSET =
+      hyper_dispatch_buffer_idx * NVL_BUFFER_X_BYTES_PER_BUFFER;
   const size_t num_bytes_per_msg_rdma_to_nvl =
       kUseFP8 ? (kHidden + kNumScales * sizeof(float))
               : (kHidden * sizeof(nv_bfloat16));
@@ -404,7 +423,9 @@ __global__ __launch_bounds__(
           const int dst_nvl_local_expert =
               rdma_local_expert_idx % kNumLocalExperts;
           const auto dst_data =
-              reinterpret_cast<int4*>(nvl_recv_x[dst_nvl_rank]) +
+              reinterpret_cast<int4*>(
+                  reinterpret_cast<uint8_t*>(nvl_recv_x[dst_nvl_rank]) +
+                  NVL_BUFFER_OFFSET) +
               ((dst_nvl_local_expert * kNumRanks + src_rank) *
                    num_max_dispatch_tokens_per_rank +
                rdma_local_expert_cumsum_index) *
@@ -450,7 +471,7 @@ __global__ __launch_bounds__(
           st_release_sys_global(
               reinterpret_cast<int*>(
                   reinterpret_cast<uint8_t*>(nvl_recv_x[dst_nvl_rank]) +
-                  NVL_BUFFER_X_BYTES) +
+                  NVL_BUFFER_OFFSET + NVL_MAX_BUFFER_X_BYTES) +
                   dst_nvl_local_expert * kNumRanks + src_rank,
               -ld_acquire_global(atomic_recv_tokens_per_rdma_expert +
                                  src_rdma_rank * kNumRdmaExperts +
@@ -473,7 +494,7 @@ __global__ __launch_bounds__(
     const auto src_rank = responsible_expert_idx / kNumLocalExperts;
     const auto local_expert_idx = responsible_expert_idx % kNumLocalExperts;
     const auto nvl_recv_x_uint8 =
-        reinterpret_cast<uint8_t*>(nvl_recv_x[nvl_rank]) +
+        reinterpret_cast<uint8_t*>(nvl_recv_x[nvl_rank]) + NVL_BUFFER_OFFSET +
         (local_expert_idx * kNumRanks + src_rank) *
             num_max_dispatch_tokens_per_rank *
             num_bytes_per_msg_rdma_revecier_and_nvl_sender;
@@ -502,7 +523,7 @@ __global__ __launch_bounds__(
       while ((num_recv_tokens = ld_acquire_sys_global(
                   reinterpret_cast<int*>(
                       reinterpret_cast<uint8_t*>(nvl_recv_x[nvl_rank]) +
-                      NVL_BUFFER_X_BYTES) +
+                      NVL_BUFFER_OFFSET + NVL_MAX_BUFFER_X_BYTES) +
                   local_expert_idx * kNumRanks + src_rank)) == 0) {
       }
       num_recv_tokens = -num_recv_tokens - 1;
@@ -515,7 +536,7 @@ __global__ __launch_bounds__(
       // reset nvl_recv_token_num
       *(reinterpret_cast<int*>(
             reinterpret_cast<uint8_t*>(nvl_recv_x[nvl_rank]) +
-            NVL_BUFFER_X_BYTES) +
+            NVL_BUFFER_OFFSET + NVL_MAX_BUFFER_X_BYTES) +
         local_expert_idx * kNumRanks + src_rank) = 0;
     }
     asm volatile("bar.sync %0, %1;" ::"r"(warp_group_id + 2),
@@ -625,7 +646,8 @@ void dispatch(void* packed_recv_x,
               bool use_fp8,
               void* workspace,
               cudaStream_t stream,
-              int phases) {
+              int phases,
+              int hyper_dispatch_buffer_idx) {
   constexpr int kNumMaxTopK = 8;
   constexpr int kNumQPs = 32;
   constexpr int NUM_WARPS = 32;
@@ -725,7 +747,8 @@ void dispatch(void* packed_recv_x,
                                   num_tokens,
                                   num_max_dispatch_tokens_per_rank,
                                   rank,
-                                  phases);
+                                  phases,
+                                  hyper_dispatch_buffer_idx);
                   })})})})});
 }
 
@@ -763,7 +786,8 @@ __global__ __launch_bounds__(
                            int num_experts,
                            int rank,
                            int num_ranks,
-                           int phases) {
+                           int phases,
+                           int hyper_dispatch_buffer_idx) {
   constexpr int UNROLL_FACTOR = kHidden / 1024;
   constexpr int kNumRanks = kNumRdmaRanks * NUM_MAX_NVL_PEERS;
   constexpr int kNumLocalExperts = kNumExperts / kNumRanks;
@@ -815,13 +839,24 @@ __global__ __launch_bounds__(
   constexpr size_t num_bytes_per_slot = kHidden * sizeof(nv_bfloat16);
   const size_t DISPATCH_NVL_BUFFER_X_BYTES =
       kNumLocalExperts * kNumRanks * num_max_dispatch_tokens_per_rank *
-          num_bytes_per_msg_rdma_revecier_and_nvl_sender_dispatch +
-      kNumExperts * sizeof(int);
+          num_bytes_per_msg_rdma_revecier_and_nvl_sender_dispatch;
   const size_t COMBINE_NVL_BUFFER_X_BYTES = kNumRdmaExperts * kNumRdmaRanks *
                                             num_max_dispatch_tokens_per_rank *
                                             num_bytes_per_slot;
-  const size_t NVL_BUFFER_X_BYTES =
-      DISPATCH_NVL_BUFFER_X_BYTES + COMBINE_NVL_BUFFER_X_BYTES;
+const size_t NVL_MAX_BUFFER_X_BYTES =
+      ((DISPATCH_NVL_BUFFER_X_BYTES > COMBINE_NVL_BUFFER_X_BYTES
+            ? DISPATCH_NVL_BUFFER_X_BYTES
+            : COMBINE_NVL_BUFFER_X_BYTES) +
+       NUM_BUFFER_ALIGNMENT_BYTES - 1) /
+      NUM_BUFFER_ALIGNMENT_BYTES * NUM_BUFFER_ALIGNMENT_BYTES;
+  constexpr size_t SIGNAL_BYTES = (kNumLocalExperts * kNumRanks * sizeof(int) +
+                                   NUM_BUFFER_ALIGNMENT_BYTES - 1) /
+                                  NUM_BUFFER_ALIGNMENT_BYTES *
+                                  NUM_BUFFER_ALIGNMENT_BYTES;
+  const size_t NVL_BUFFER_X_BYTES_PER_BUFFER =
+      NVL_MAX_BUFFER_X_BYTES + SIGNAL_BYTES;
+  const size_t NVL_BUFFER_OFFSET =
+      hyper_dispatch_buffer_idx * NVL_BUFFER_X_BYTES_PER_BUFFER;
     
   if ((phases & LOW_LATENCY_SEND_PHASE) == 0)
     goto LOW_LATENCY_COMBINE_RECV;
@@ -858,7 +893,7 @@ __global__ __launch_bounds__(
       // nvl recv buffer
       const auto dst_ptr = reinterpret_cast<int4*>(
           reinterpret_cast<uint8_t*>(nvl_recv_buffer[dst_nvl_rank]) +
-          DISPATCH_NVL_BUFFER_X_BYTES +
+          NVL_BUFFER_OFFSET +
           ((global_rdma_expert_idx * kNumRdmaRanks + dst_rdma_rank) *
                num_max_dispatch_tokens_per_rank +
            dst_rdma_index) *
@@ -879,10 +914,11 @@ __global__ __launch_bounds__(
     asm volatile("bar.sync %0, %1;" ::"r"(warp_group_id + 1),
                  "r"(kNumWarpsPerGroup * 32));
     if (sub_warp_id == 1 && lane_id == 0) {
-      auto dst_ptr = reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(
-                                                nvl_recv_buffer[dst_nvl_rank]) +
-                                            NVL_BUFFER_X_BYTES) +
-                     global_rdma_expert_idx * kNumRdmaRanks + dst_rdma_rank;
+      auto dst_ptr =
+          reinterpret_cast<int*>(
+              reinterpret_cast<uint8_t*>(nvl_recv_buffer[dst_nvl_rank]) +
+              NVL_BUFFER_OFFSET + NVL_MAX_BUFFER_X_BYTES) +
+          global_rdma_expert_idx * kNumRdmaRanks + dst_rdma_rank;
       st_release_sys_global(dst_ptr, 1);
     }
     __syncwarp();
@@ -896,13 +932,13 @@ __global__ __launch_bounds__(
       while (ld_acquire_sys_global(
                  reinterpret_cast<int*>(
                      reinterpret_cast<uint8_t*>(nvl_recv_buffer[nvl_rank]) +
-                     NVL_BUFFER_X_BYTES) +
+                     NVL_BUFFER_OFFSET + NVL_MAX_BUFFER_X_BYTES) +
                  responsible_expert_idx) == 0) {
       }
       // reset nvl_recv_buffer
       *(reinterpret_cast<int*>(
             reinterpret_cast<uint8_t*>(nvl_recv_buffer[nvl_rank]) +
-            NVL_BUFFER_X_BYTES) +
+            NVL_BUFFER_OFFSET + NVL_MAX_BUFFER_X_BYTES) +
         responsible_expert_idx) = 0;
     }
   }
@@ -954,7 +990,7 @@ __global__ __launch_bounds__(
                 nvl_rank_meta_now)[nvl_rank_idx * 3 + 2];
             const int4* src_ptr = reinterpret_cast<int4*>(
                 reinterpret_cast<uint8_t*>(nvl_recv_buffer[nvl_rank]) +
-                DISPATCH_NVL_BUFFER_X_BYTES +
+                NVL_BUFFER_OFFSET +
                 ((dst_rdma_expert_idx * kNumRdmaRanks + deal_rdma_rank) *
                      num_max_dispatch_tokens_per_rank +
                  dst_cum_index) *
@@ -1130,7 +1166,8 @@ void combine(void* combined_x,
              void* workspace,
              cudaStream_t stream,
              int phases,
-             bool dispatch_use_fp8) {
+             bool dispatch_use_fp8,
+             int hyper_combine_buffer_idx) {
   constexpr int kNumMaxTopk = 8;
   constexpr int kNumQPs = 4;
   constexpr int NUM_WARPS = 32;
@@ -1212,7 +1249,8 @@ void combine(void* combined_x,
                                   num_experts,
                                   rank,
                                   num_ranks,
-                                  phases);
+                                  phases,
+                                  hyper_combine_buffer_idx);
                   })})})})})
 }
 

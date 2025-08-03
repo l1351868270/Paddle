@@ -52,6 +52,9 @@ struct Buffer {
   // Low-latency mode buffer
   int low_latency_buffer_idx = 0;
   bool low_latency_mode = false;
+  int m2n_low_latency_hyper_combine_buffer_idx = 0;
+  int m2n_low_latency_hyper_dispatch_buffer_idx = 0;
+  int m2n_af_num_micro_batches = 3;
 
   // NVLink Buffer
   int64_t num_nvl_bytes;
