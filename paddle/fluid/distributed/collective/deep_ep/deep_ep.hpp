@@ -337,9 +337,23 @@ struct Buffer {
                                  const deep_ep::detail::Tensor& topk_weights,
                                  int num_max_dispatch_tokens_per_rank,
                                  int num_experts,
+                                 int a_start_rank,
+                                 int a_num_ranks,
+                                 int e_start_rank,
+                                 int e_num_ranks,
                                  bool use_fp8,
                                  bool async,
                                  bool return_recv_hook);
+
+  std::tuple<std::optional<EventHandle>>
+  m2n_low_latency_dispatch_two_stage_wait(int hidden,
+                                          int num_max_dispatch_tokens_per_rank,
+                                          int num_experts,
+                                          int num_topk,
+                                          int a_start_rank,
+                                          int a_num_ranks,
+                                          int e_start_rank,
+                                          int e_num_ranks);
 
   std::tuple<deep_ep::detail::Tensor,
              std::optional<EventHandle>,
@@ -496,6 +510,10 @@ struct Buffer {
                                      const paddle::Tensor& topk_weights,
                                      int num_max_dispatch_tokens_per_rank,
                                      int num_experts,
+                                     int a_start_rank,
+                                     int a_num_ranks,
+                                     int e_start_rank,
+                                     int e_num_ranks,
                                      bool use_fp8,
                                      bool async,
                                      bool return_recv_hook);
