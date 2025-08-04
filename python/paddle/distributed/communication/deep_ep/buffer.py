@@ -1631,7 +1631,7 @@ class M2NBuffer(object):
         tuple[paddle.Tensor, paddle.Tensor],
         tuple,
         EventOverlap,
-        M2NWorker,
+        Callable,
     ]:
         assert num_experts % self.e_num_ranks == 0
         m2n_topk_idx = topk_idx + self.e_start_rank * (num_experts // self.e_num_ranks)
@@ -1659,7 +1659,7 @@ class M2NBuffer(object):
             packed_recv_x,
             handle,
             event,
-            M2NWorker(hook),
+            hook,
         ) 
 
     def a2e_irecv_two_stage_v2(
@@ -1674,7 +1674,7 @@ class M2NBuffer(object):
         paddle.Tensor,
         tuple,
         EventOverlap,
-        M2NWorker,
+        Callable,
     ]:
         x = paddle.empty(
             (0, hidden), 
@@ -1718,7 +1718,7 @@ class M2NBuffer(object):
             rdma_send_flags,
             handle,
             event,
-            M2NWorker(hook),
+            hook,
         ) 
 
     def e2a_isend_two_stage_v2(
@@ -1728,7 +1728,7 @@ class M2NBuffer(object):
         handle: tuple,
         dispatch_use_fp8: bool = False,
         out: paddle.Tensor | None = None,
-    ) -> tuple[EventOverlap, M2NWorker]:
+    ) -> tuple[EventOverlap, Callable]:
         topk_idx = paddle.empty(
             (0, num_topk),
             dtype='int64',
@@ -1752,7 +1752,7 @@ class M2NBuffer(object):
 
         return (
             event, 
-            M2NWorker(hook),
+            hook,
         )
 
 
@@ -1763,7 +1763,7 @@ class M2NBuffer(object):
         handle: tuple,
         dispatch_use_fp8: bool = False,
         out: paddle.Tensor | None = None,
-    ) -> tuple[paddle.Tensor, EventOverlap, M2NWorker]:
+    ) -> tuple[paddle.Tensor, EventOverlap, Callable]:
         (
             src_info,
             layout_range,
@@ -1793,5 +1793,5 @@ class M2NBuffer(object):
         return (
             combined_x,
             event,
-            M2NWorker(hook),
+            hook,
         )
