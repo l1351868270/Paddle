@@ -109,7 +109,7 @@ def test_main(
             use_fp8=use_fp8,
         )
         print(f"rank: {rank}, dispatch_send", flush=True)
-
+        print(f"rank: {rank}, dispatch_send: {handles[0][0]}", flush=True)
         e2a_x, e2a_event, e2a_irecv_hook = buffer.e2a_irecv_two_stage_v3(
             topk_idx,
             topk_weights,
