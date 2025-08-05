@@ -40,6 +40,7 @@ __global__ __launch_bounds__(
     kNumWarpGroups* kNumWarpsPerGroup * 32,
     1) void dispatch_kernel(void* packed_recv_x,
                             float* packed_recv_x_scales,
+                            void* packed_rdma_recv_x,
                             int* packed_recv_src_info,
                             int64_t* packed_recv_layout_range,
                             int* packed_recv_count,
@@ -350,7 +351,7 @@ __global__ __launch_bounds__(
     // int e_start_rdma_rank = e_start_rank / NUM_MAX_NVL_PEERS;
     if (sm_id < e_num_rdma_rank && thread_id == 0) {
       int src_rdma_rank = sm_id;
-      printf("[kernel] src_rdma_rank: %d, offset: %d\n", src_rdma_rank, src_rdma_rank);
+      printf("[kernel][dispatch] src_rdma_rank: %d, offset: %d\n", src_rdma_rank, src_rdma_rank);
       auto dst_ptr = reinterpret_cast<uint64_t>(
           rdma_recv_complete + src_rdma_rank);
       while ((ld_acquire_sys_global(
@@ -373,7 +374,9 @@ __global__ __launch_bounds__(
       const auto rdma_recv_x_uint8 =
           reinterpret_cast<uint8_t*>(rdma_recv_x) +
           src_rdma_rank * num_max_dispatch_tokens_per_rank * num_bytes_per_msg;
-
+      const auto packed_rdma_recv_x_uint8 =
+          reinterpret_cast<uint8_t*>(packed_rdma_recv_x) +
+          src_rdma_rank * num_max_dispatch_tokens_per_rank * num_bytes_per_msg;
       __shared__ int shared_num_recv_tokens[1];
       int num_recv_tokens_per_rdma;
       if (thread_id < kNumQPs) {
@@ -396,6 +399,8 @@ __global__ __launch_bounds__(
            rdma_recv_token_idx += sms_per_rdma) {
         const auto rdma_recv_x_uint8_now =
             rdma_recv_x_uint8 + rdma_recv_token_idx * num_bytes_per_msg;
+        const auto packed_rdma_recv_x_uint8_now =
+            packed_rdma_recv_x_uint8 + rdma_recv_token_idx * num_bytes_per_msg;
         const auto src_data = reinterpret_cast<int4*>(rdma_recv_x_uint8_now);
         const auto rdma_recv_x_scales = reinterpret_cast<float*>(
             reinterpret_cast<uint8_t*>(src_data) + sizeof(int4) + hidden_bytes);
@@ -406,6 +411,18 @@ __global__ __launch_bounds__(
         const auto rdma_recv_nvl_rank_meta_now =
             rdma_recv_nvl_rank_meta + rdma_rank * (kTopk * 3 + 1) + 1;
 
+        // Used in combine
+        if (warp_id == num_warps - 1) {
+          UNROLLED_WARP_COPY(
+              UNROLL_FACTOR,
+              lane_id,
+              num_int4_per_msg,
+              reinterpret_cast<int4*>(packed_rdma_recv_x_uint8_now),
+              reinterpret_cast<int4*>(rdma_recv_x_uint8_now),
+              ld_nc_global,
+              st_na_global);
+          __syncwarp();
+        } 
 
         // nvl sender
         for (int loop_nvl_expert_i = warp_id;
@@ -591,7 +608,7 @@ __global__ __launch_bounds__(
       int dst_rdma_rank = sm_id + a_start_rdma_rank;
       auto dst_ptr = reinterpret_cast<uint64_t>(
           rdma_recv_complete + (rdma_rank - e_start_rdma_rank));
-      printf("[kernel] dst_rank: %d, offset: %d\n", dst_rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank, rdma_rank - e_start_rdma_rank);
+      printf("[kernel][dispatch] dst_rank: %d, offset: %d\n", dst_rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank, rdma_rank - e_start_rdma_rank);
       nvshmemi_ibgda_amo_nonfetch_add(
           reinterpret_cast<int*>(dst_ptr),
           1,
@@ -603,6 +620,7 @@ __global__ __launch_bounds__(
 
 void dispatch(void* packed_recv_x,
               float* packed_recv_x_scales,
+              void* packed_rdma_recv_x,
               int* packed_recv_src_info,
               int64_t* packed_recv_layout_range,
               int* packed_recv_count,
@@ -709,6 +727,7 @@ void dispatch(void* packed_recv_x,
                                   dispatch_func,
                                   packed_recv_x,
                                   packed_recv_x_scales,
+                                  packed_rdma_recv_x,
                                   packed_recv_src_info,
                                   packed_recv_layout_range,
                                   packed_recv_count,
