@@ -22,12 +22,12 @@ B = paddle.randn((8192, 28672), dtype="bfloat16")
 C = paddle.randn((28672, 8192), dtype="bfloat16")
 def moe(num_tokens, hidden):
     paddle.matmul(paddle.matmul(A, B) + paddle.matmul(A, B), C)
-    time.sleep(1)
+    # time.sleep(1)
     return paddle.zeros((num_tokens, hidden), dtype="bfloat16")
 
 def attention(num_tokens, hidden):
     paddle.matmul(paddle.matmul(A, B) + paddle.matmul(A, B), C)
-    time.sleep(1)
+    # time.sleep(1)
     return paddle.zeros((num_tokens, hidden), dtype="bfloat16")
 
 def test_main(
@@ -125,9 +125,9 @@ def test_main(
 
         event.current_stream_wait()
         print(f"rank: {rank}, dispatch_send event wait", flush=True)
-        # a2e_isend_hook_event = a2e_isend_hook()
-        # a2e_isend_hook_event.current_stream_wait()
-        # print(f"rank: {rank}, dispatch_send hook event wait", flush=True)
+        a2e_isend_hook_event = a2e_isend_hook()
+        a2e_isend_hook_event.current_stream_wait()
+        print(f"rank: {rank}, dispatch_send hook event wait", flush=True)
         
         packed_recv_x, handles[1], event, a2e_isend_hook = buffer.a2e_isend_two_stage_v3(
             x,
@@ -161,9 +161,9 @@ def test_main(
 
         event.current_stream_wait()
         print(f"rank: {rank}, dispatch_send event wait", flush=True)
-        # a2e_isend_hook_event = a2e_isend_hook.hook()
-        # a2e_isend_hook_event.current_stream_wait()
-        # print(f"rank: {rank}, dispatch_send hook event wait", flush=True)
+        a2e_isend_hook_event = a2e_isend_hook()
+        a2e_isend_hook_event.current_stream_wait()
+        print(f"rank: {rank}, dispatch_send hook event wait", flush=True)
 
         packed_recv_x, handles[1], event, a2e_isend_hook = buffer.a2e_isend_two_stage_v3(
             x,
@@ -188,9 +188,9 @@ def test_main(
 
         event.current_stream_wait()
         print(f"rank: {rank}, dispatch_send event wait", flush=True)
-        # a2e_isend_hook_event = a2e_isend_hook()
-        # a2e_isend_hook_event.current_stream_wait()
-        # print(f"rank: {rank}, dispatch_send hook event wait", flush=True)
+        a2e_isend_hook_event = a2e_isend_hook()
+        a2e_isend_hook_event.current_stream_wait()
+        print(f"rank: {rank}, dispatch_send hook event wait", flush=True)
 
         packed_recv_x, handles[1], event, a2e_isend_hook = buffer.a2e_isend_two_stage_v3(
             x,
@@ -204,9 +204,9 @@ def test_main(
 
         event.current_stream_wait()
         print(f"rank: {rank}, dispatch_send event wait", flush=True)
-        # a2e_isend_hook_event = a2e_isend_hook()
-        # a2e_isend_hook_event.current_stream_wait()
-        # print(f"rank: {rank}, dispatch_send hook event wait", flush=True)
+        a2e_isend_hook_event = a2e_isend_hook()
+        a2e_isend_hook_event.current_stream_wait()
+        print(f"rank: {rank}, dispatch_send hook event wait", flush=True)
 
         print("[rank: {rank}] attention end")
 
@@ -300,10 +300,10 @@ def test_main(
         
         e2a_event.current_stream_wait()
         print(f"rank: {rank}, combine wait", flush=True)
-        # e2a_isend_event = e2a_isend_hook()
-        # print(f"rank: {rank}, combine hook", flush=True)
-        # e2a_isend_event.current_stream_wait()
-        # print(f"rank: {rank}, combine hook wait", flush=True)
+        e2a_isend_event = e2a_isend_hook()
+        print(f"rank: {rank}, combine hook", flush=True)
+        e2a_isend_event.current_stream_wait()
+        print(f"rank: {rank}, combine hook wait", flush=True)
 
         if use_fp8:
             simulated_gemm_x = per_token_cast_back(
@@ -350,10 +350,10 @@ def test_main(
 
         e2a_event.current_stream_wait()
         print(f"rank: {rank}, combine wait", flush=True)
-        # e2a_isend_event = e2a_isend_hook()
-        # print(f"rank: {rank}, combine hook", flush=True)
-        # e2a_isend_event.current_stream_wait()
-        # print(f"rank: {rank}, combine hook wait", flush=True)
+        e2a_isend_event = e2a_isend_hook()
+        print(f"rank: {rank}, combine hook", flush=True)
+        e2a_isend_event.current_stream_wait()
+        print(f"rank: {rank}, combine hook wait", flush=True)
 
         event.current_stream_wait()
         print(f"rank: {rank}, dispatch event wait", flush=True)
