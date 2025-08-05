@@ -330,7 +330,6 @@ struct Buffer {
              deep_ep::detail::Tensor,
              deep_ep::detail::Tensor,
              deep_ep::detail::Tensor,
-             deep_ep::detail::Tensor,
              std::optional<EventHandle>,
              std::optional<std::function<EventHandle()>>>
   m2n_low_latency_dispatch_two_stage(const deep_ep::detail::Tensor& x,
@@ -351,7 +350,6 @@ struct Buffer {
              std::optional<std::function<EventHandle()>>>
   m2n_low_latency_combine_two_stage(
       const deep_ep::detail::Tensor& x,
-      const deep_ep::detail::Tensor& rdma_recv_x,
       const deep_ep::detail::Tensor& topk_idx,
       const deep_ep::detail::Tensor& topk_weights,
       const deep_ep::detail::Tensor& src_info,
@@ -499,7 +497,6 @@ struct Buffer {
              paddle::Tensor,
              paddle::Tensor,
              paddle::Tensor,
-             paddle::Tensor,
              std::optional<EventHandle>,
              std::optional<std::function<EventHandle()>>>
   m2n_low_latency_dispatch_two_stage_api(const paddle::Tensor& x,
@@ -520,7 +517,6 @@ struct Buffer {
              std::optional<std::function<EventHandle()>>>
   m2n_low_latency_combine_two_stage_api(
       const paddle::Tensor& x,
-      const paddle::Tensor& rdma_recv_x,
       const paddle::Tensor& topk_idx,
       const paddle::Tensor& topk_weights,
       const paddle::Tensor& src_info,
