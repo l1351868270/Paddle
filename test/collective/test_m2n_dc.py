@@ -22,12 +22,10 @@ B = paddle.randn((8192, 28672), dtype="bfloat16")
 C = paddle.randn((28672, 8192), dtype="bfloat16")
 def moe(num_tokens, hidden):
     paddle.matmul(paddle.matmul(A, B) + paddle.matmul(A, B), C)
-    time.sleep(1)
     return paddle.zeros((num_tokens, hidden), dtype="bfloat16")
 
 def attention(num_tokens, hidden):
     paddle.matmul(paddle.matmul(A, B) + paddle.matmul(A, B), C)
-    time.sleep(1)
     return paddle.zeros((num_tokens, hidden), dtype="bfloat16")
 
 def test_main(
@@ -101,9 +99,9 @@ def test_main(
         print(f"rank: {rank}, attention 2_1", flush=True)
         event.current_stream_wait()
         print(f"rank: {rank}, dispatch_send event wait", flush=True)
-        # a2e_isend_hook_event = a2e_isend_hook()
-        # a2e_isend_hook_event.current_stream_wait()
-        # print(f"rank: {rank}, dispatch_send hook event wait", flush=True)
+        a2e_isend_hook_event = a2e_isend_hook()
+        a2e_isend_hook_event.current_stream_wait()
+        print(f"rank: {rank}, dispatch_send hook event wait", flush=True)
 
         e2a_x, e2a_event, e2a_irecv_hook = buffer.e2a_irecv_two_stage_v3(
             topk_idx,
@@ -167,9 +165,9 @@ def test_main(
         print(f"rank: {rank}, combine", flush=True)
         e2a_event.current_stream_wait()
         print(f"rank: {rank}, combine wait", flush=True)
-        # e2a_isend_hook_event = e2a_isend_hook()
-        # print(f"rank: {rank}, combine hook wait", flush=True)
-        # e2a_isend_hook_event.current_stream_wait()
+        e2a_isend_hook_event = e2a_isend_hook()
+        print(f"rank: {rank}, combine hook wait", flush=True)
+        e2a_isend_hook_event.current_stream_wait()
 
     run_time = 1
     print("run_time: ", run_time)

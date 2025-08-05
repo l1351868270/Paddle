@@ -47,6 +47,7 @@ __global__ __launch_bounds__(
                             bool* rdma_send_flags,  // kNumRdmaRanks
                             void* rdma_recv_x,
                             int* rdma_recv_count,
+                            int* rdma_recv_complete,
                             void* rdma_x,
                             void** nvl_recv_x,  // num_local_experts * dp_num *
                                                 // num_max_token_per_dp *
@@ -65,6 +66,10 @@ __global__ __launch_bounds__(
                             int num_tokens,
                             int num_max_dispatch_tokens_per_rank,
                             int rank,
+                            int a_start_rank,
+                            int a_num_ranks,
+                            int e_start_rank,
+                            int e_num_ranks,
                             int phases) {
   constexpr int UNROLL_FACTOR = kHidden / 1024;
   constexpr int kNumRanks = kNumRdmaRanks * NUM_MAX_NVL_PEERS;
@@ -80,6 +85,10 @@ __global__ __launch_bounds__(
   const auto warp_group_id = warp_id / kNumWarpsPerGroup;
   const auto sub_warp_id = warp_id % kNumWarpsPerGroup;
   const auto responsible_expert_idx = sm_id * kNumWarpGroups + warp_group_id;
+
+  // if (thread_id == 0) {
+  //   printf("[kernel][rank: %d] a_start_rank: %d, a_num_ranks: %d, e_start_rank: %d, e_num_ranks: %d\n", rank, a_start_rank, a_num_ranks, e_start_rank, e_num_ranks);
+  // }
 
   const auto rdma_rank = rank / NUM_MAX_NVL_PEERS,
              nvl_rank = rank % NUM_MAX_NVL_PEERS;
@@ -330,22 +339,28 @@ __global__ __launch_bounds__(
     }
   }
 
-  // if (rdma_rank < 2) {
-  //   const int sms_per_rdma = num_sms / kNumRdmaRanks;
-  //   const int src_rdma_rank = sm_id / sms_per_rdma;
-  //   if (src_rdma_rank < kNumRdmaRanks) {
-  //     const int sub_rdma_rank = sm_id % sms_per_rdma;
-  //   }
-  //   for (int reset_i = thread_id; reset_i < kNumQPs;
-  //         reset_i += num_threads) {
-  //     rdma_recv_count[src_rdma_rank * kNumQPs + reset_i] = 0;
-  //   }
-  //   return;
-  // }
-
   LOW_LATENCY_DISPATCH_RECV:
   if ((phases & LOW_LATENCY_RECV_PHASE) == 0) 
     return;
+
+  // TODO: only wait one rank complete, is need to wait all rank complete
+  // 
+  if (rank >= a_start_rank && rank < a_start_rank + a_num_ranks) {
+    int e_num_rdma_rank = e_num_ranks / NUM_MAX_NVL_PEERS;
+    // int e_start_rdma_rank = e_start_rank / NUM_MAX_NVL_PEERS;
+    if (sm_id < e_num_rdma_rank && thread_id == 0) {
+      int src_rdma_rank = sm_id;
+      printf("[kernel] src_rdma_rank: %d, offset: %d\n", src_rdma_rank, src_rdma_rank);
+      auto dst_ptr = reinterpret_cast<uint64_t>(
+          rdma_recv_complete + src_rdma_rank);
+      while ((ld_acquire_sys_global(
+          rdma_recv_complete + src_rdma_rank)) ==
+        0) {
+      }
+      rdma_recv_complete[src_rdma_rank] = 0;
+    }
+    return;
+  }
 
   /* RDMA Receiver and NVL Sender */
   {
@@ -567,36 +582,23 @@ __global__ __launch_bounds__(
       }
     }
   }
-
-  // // Issue count sends
-  // if (sm_id < kNumRdmaRanks) {
-  //   int dst_rdma_rank = sm_id;
-  //   const auto num_tokens_sent =
-  //       atomic_finished_counter_per_rdma[dst_rdma_rank];
-
-  //   if (thread_id < kNumQPs) {
-  //     auto dst_ptr = reinterpret_cast<uint64_t>(
-  //         rdma_recv_count + rdma_rank * kNumQPs + thread_id);
-
-  //     bool is_local_copy = dst_rdma_rank == rdma_rank;
-  //     if (is_local_copy) {  // local copy
-  //       st_na_release(rdma_recv_count + rdma_rank * kNumQPs + thread_id,
-  //                     -num_tokens_sent - 1);
-  //     } else {
-  //       nvshmemi_ibgda_amo_nonfetch_add(
-  //           reinterpret_cast<int*>(dst_ptr),
-  //           -num_tokens_sent - 1,
-  //           dst_rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank,
-  //           thread_id);
-  //     }
-  //   }
-  //   __syncthreads();
-  //   // clean
-  //   if (thread_id == 0) {
-  //     atomic_counter_per_rdma[dst_rdma_rank] = 0;
-  //     atomic_finished_counter_per_rdma[dst_rdma_rank] = 0;
-  //   }
-  // }
+  // TODO: 
+  if (rank >= e_start_rank && rank < e_start_rank + e_num_ranks) {
+    int a_num_rdma_rank = a_num_ranks / NUM_MAX_NVL_PEERS;
+    int a_start_rdma_rank = a_start_rank / NUM_MAX_NVL_PEERS;
+    int e_start_rdma_rank = e_start_rank / NUM_MAX_NVL_PEERS;
+    if (sm_id < a_num_rdma_rank && thread_id == 0) {
+      int dst_rdma_rank = sm_id + a_start_rdma_rank;
+      auto dst_ptr = reinterpret_cast<uint64_t>(
+          rdma_recv_complete + (rdma_rank - e_start_rdma_rank));
+      printf("[kernel] dst_rank: %d, offset: %d\n", dst_rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank, rdma_rank - e_start_rdma_rank);
+      nvshmemi_ibgda_amo_nonfetch_add(
+          reinterpret_cast<int*>(dst_ptr),
+          1,
+          dst_rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank,
+          thread_id);
+    }
+  }
 }
 
 void dispatch(void* packed_recv_x,
@@ -608,6 +610,7 @@ void dispatch(void* packed_recv_x,
               bool* rdma_send_flags,
               void* rdma_recv_x,
               int* rdma_recv_count,
+              int* rdma_recv_complete,
               void* rdma_x,
               void** nvl_recv_x,
               const void* x,
@@ -622,6 +625,10 @@ void dispatch(void* packed_recv_x,
               int num_experts,
               int rank,
               int num_ranks,
+              int a_start_rank,
+              int a_num_ranks,
+              int e_start_rank,
+              int e_num_ranks,
               bool use_fp8,
               void* workspace,
               cudaStream_t stream,
@@ -709,6 +716,7 @@ void dispatch(void* packed_recv_x,
                                   rdma_send_flags,
                                   rdma_recv_x,
                                   rdma_recv_count,
+                                  rdma_recv_complete,
                                   rdma_x,
                                   nvl_recv_x,
                                   x,
@@ -725,6 +733,10 @@ void dispatch(void* packed_recv_x,
                                   num_tokens,
                                   num_max_dispatch_tokens_per_rank,
                                   rank,
+                                  a_start_rank,
+                                  a_num_ranks,
+                                  e_start_rank,
+                                  e_num_ranks,
                                   phases);
                   })})})})});
 }
@@ -743,6 +755,7 @@ __global__ __launch_bounds__(
                            void* rdma_recv_x,
                            int* rdma_recv_flag,
                            void* rdma_send_x,
+                           int* rdma_recv_complete,
                            void* dispatch_rdma_recv_x,
                            const int* dispatch_rdma_recv_count,
                            void** nvl_recv_buffer,
@@ -763,6 +776,10 @@ __global__ __launch_bounds__(
                            int num_experts,
                            int rank,
                            int num_ranks,
+                           int a_start_rank,
+                           int a_num_ranks,
+                           int e_start_rank,
+                           int e_num_ranks,
                            int phases) {
   constexpr int UNROLL_FACTOR = kHidden / 1024;
   constexpr int kNumRanks = kNumRdmaRanks * NUM_MAX_NVL_PEERS;
@@ -1060,6 +1077,23 @@ __global__ __launch_bounds__(
   if ((phases & LOW_LATENCY_RECV_PHASE) == 0)
       return;
 
+  if (rank >= e_start_rank && rank < e_start_rank + e_num_ranks) {
+    int a_num_rdma_rank = a_num_ranks / NUM_MAX_NVL_PEERS;
+    // int e_start_rdma_rank = e_start_rank / NUM_MAX_NVL_PEERS;
+    if (sm_id < a_num_rdma_rank && thread_id == 0) {
+      int src_rdma_rank = sm_id;
+      printf("[kernel][combine] src_rdma_rank: %d, offset: %d\n", src_rdma_rank, src_rdma_rank);
+      auto dst_ptr = reinterpret_cast<uint64_t>(
+          rdma_recv_complete + src_rdma_rank);
+      while ((ld_acquire_sys_global(
+          rdma_recv_complete + src_rdma_rank)) ==
+        0) {
+      }
+      rdma_recv_complete[src_rdma_rank] = 0;
+    }
+    return;
+  }
+
   /* RDMA Receiver / RDMA Reducer */
   // Wait all rdma ranks to arrive
   if (sm_id < kNumRdmaRanks) {
@@ -1103,12 +1137,30 @@ __global__ __launch_bounds__(
        token_idx * hidden_bf16_int4)[g_id] = combined_int4;
     }
   }
+    // TODO: 
+  if (rank >= a_start_rank && rank < a_start_rank + a_num_ranks) {
+    int e_num_rdma_rank = e_num_ranks / NUM_MAX_NVL_PEERS;
+    int e_start_rdma_rank = e_start_rank / NUM_MAX_NVL_PEERS;
+    int a_start_rdma_rank = a_start_rank / NUM_MAX_NVL_PEERS;
+    if (sm_id < e_num_rdma_rank && thread_id == 0) {
+      int dst_rdma_rank = sm_id + e_start_rdma_rank;
+      auto dst_ptr = reinterpret_cast<uint64_t>(
+          rdma_recv_complete + (rdma_rank - a_start_rdma_rank));
+      printf("[kernel][combine] dst_rank: %d, offset: %d\n", dst_rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank, rdma_rank - a_start_rdma_rank);
+      nvshmemi_ibgda_amo_nonfetch_add(
+          reinterpret_cast<int*>(dst_ptr),
+          1,
+          dst_rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank,
+          thread_id);
+    }
+  }
 }
 
 void combine(void* combined_x,
              void* rdma_recv_x,
              int* rdma_recv_flag,
              void* rdma_send_x,
+             int* rdma_recv_complete,
              void* dispatch_rdma_recv_x,
              const int* dispatch_rdma_recv_count,
              void** nvl_buffer,
@@ -1127,6 +1179,10 @@ void combine(void* combined_x,
              int num_experts,
              int rank,
              int num_ranks,
+             int a_start_rank,
+             int a_num_ranks,
+             int e_start_rank,
+             int e_num_ranks,
              void* workspace,
              cudaStream_t stream,
              int phases,
@@ -1192,6 +1248,7 @@ void combine(void* combined_x,
                                   rdma_recv_x,
                                   rdma_recv_flag,
                                   rdma_send_x,
+                                  rdma_recv_complete,
                                   dispatch_rdma_recv_x,
                                   dispatch_rdma_recv_count,
                                   nvl_buffer,
@@ -1212,6 +1269,10 @@ void combine(void* combined_x,
                                   num_experts,
                                   rank,
                                   num_ranks,
+                                  a_start_rank,
+                                  a_num_ranks,
+                                  e_start_rank,
+                                  e_num_ranks,
                                   phases);
                   })})})})})
 }
