@@ -2298,7 +2298,7 @@ Buffer::m2n_low_latency_dispatch_two_stage(
 
   auto compute_stream = calc_ctx->stream();
   auto launch_stream = comm_stream;
-  // stream_wait(launch_stream, compute_stream);
+  stream_wait(launch_stream, compute_stream);
 
   auto return_x_dtype = phi::DataType::BFLOAT16;
   if (use_fp8) {
@@ -2430,7 +2430,7 @@ Buffer::m2n_low_latency_dispatch_two_stage(
     // event handle.
     event = EventHandle(launch_stream);
   }
-  // stream_wait(launch_stream, compute_stream);
+  stream_wait(launch_stream, compute_stream);
 
   // Receiver callback
   std::optional<std::function<EventHandle()>> recv_hook = std::nullopt;
@@ -2521,7 +2521,7 @@ Buffer::m2n_low_latency_combine_two_stage(
 
   auto compute_stream = calc_ctx->stream();
   auto launch_stream = comm_stream;
-  // stream_wait(launch_stream, compute_stream);
+  stream_wait(launch_stream, compute_stream);
 
   // Allocate output tensor
   deep_ep::detail::Tensor combined_x;
@@ -2595,7 +2595,7 @@ Buffer::m2n_low_latency_combine_two_stage(
     // event handle.
     event = EventHandle(launch_stream);
   } 
-  // stream_wait(launch_stream, compute_stream);
+  stream_wait(launch_stream, compute_stream);
 
   // Receiver callback
   std::optional<std::function<EventHandle()>> recv_hook = std::nullopt;
