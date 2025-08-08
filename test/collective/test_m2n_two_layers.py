@@ -70,15 +70,15 @@ def test_main(
     
     if rank >= a_start_rank and rank < a_start_rank + a_num_ranks:
         x = paddle.ones((num_tokens, hidden), dtype="bfloat16") * (
-            rank - rank_offset
+            rank + 1
         )
-        x[:, -128:] = paddle.arange(0, num_tokens, dtype="bfloat16").view((-1, 1))
-        x = paddle.randn((num_tokens, hidden), dtype="bfloat16")
+        # x[:, -128:] = paddle.arange(0, num_tokens, dtype="bfloat16").view((-1, 1))
+        # x = paddle.randn((num_tokens, hidden), dtype="bfloat16")
         topk_idx = paddle.randint(
             0, num_experts, shape=[num_tokens, num_topk], dtype="int64"
         )
         print(f"rank: {rank}, num_local_experts: {num_local_experts}")
-        topk_weights = paddle.randn((num_tokens, num_topk), dtype="float32").abs_()
+        topk_weights = paddle.ones((num_tokens, num_topk), dtype="float32").abs_()
         print("x: ", x, flush=True)
         print("topk_idx: ", topk_idx, flush=True)
         print("topk_weights: ", topk_weights, flush=True)
@@ -109,6 +109,7 @@ def test_main(
             num_experts,
             use_fp8=use_fp8,
         )
+        print(f"===  rank:{rank} a2e stage 1 send x :{x} ===", flush=True)
         print(f"rank: {rank}, dispatch_send", flush=True)
         # print(f"rank: {rank}, dispatch_send: {handles[0][0]}", flush=True)
         e2a_x, e2a_event, e2a_irecv_hook = buffer.e2a_irecv_two_stage_v3(
@@ -130,7 +131,7 @@ def test_main(
         a2e_isend_hook_event.current_stream_wait()
         print(f"rank: {rank}, dispatch_send hook event wait", flush=True)
         
-        packed_recv_x, handles[1], event, a2e_isend_hook = buffer.a2e_isend_two_stage_v3(
+        packed_recv_x, handles[0], event, a2e_isend_hook = buffer.a2e_isend_two_stage_v3(
             x,
             topk_idx,
             topk_weights,
@@ -138,6 +139,7 @@ def test_main(
             num_experts,
             use_fp8=use_fp8,
         )
+        print(f"====  rank:{rank} a2e stage 2 send x :{x} ===")
         print(f"rank: {rank}, dispatch_send", flush=True)
 
         e2a_event.current_stream_wait()
@@ -146,7 +148,7 @@ def test_main(
         print(f"rank: {rank}, combine hook", flush=True)
         e2a_irecv_hook_event.current_stream_wait()
         print(f"rank: {rank}, combine hook event wait", flush=True)
-
+        print(f"===  rank:{rank} e2a stage 1 recv x :{e2a_x} ===", flush=True)
         e2a_x, e2a_event, e2a_irecv_hook = buffer.e2a_irecv_two_stage_v3(
             topk_idx,
             topk_weights,
@@ -166,7 +168,7 @@ def test_main(
         a2e_isend_hook_event.current_stream_wait()
         print(f"rank: {rank}, dispatch_send hook event wait", flush=True)
 
-        packed_recv_x, handles[1], event, a2e_isend_hook = buffer.a2e_isend_two_stage_v3(
+        packed_recv_x, handles[0], event, a2e_isend_hook = buffer.a2e_isend_two_stage_v3(
             x,
             topk_idx,
             topk_weights,
@@ -174,6 +176,7 @@ def test_main(
             num_experts,
             use_fp8=use_fp8,
         )
+        print(f"==== rank:{rank} a2e stage 3 send x :{x} ===")
         print(f"rank: {rank}, dispatch_send", flush=True)
         
         e2a_event.current_stream_wait()
@@ -182,7 +185,7 @@ def test_main(
         print(f"rank: {rank}, combine hook", flush=True)
         e2a_irecv_hook_event.current_stream_wait()
         print(f"rank: {rank}, combine hook event wait", flush=True)
-
+        print(f"===  rank:{rank} e2a stage 2 recv x :{e2a_x} ===", flush=True)
         # 2_2
         attention(num_tokens, hidden)
         print(f"rank: {rank}, attention 2_2", flush=True)
@@ -193,7 +196,7 @@ def test_main(
         a2e_isend_hook_event.current_stream_wait()
         print(f"rank: {rank}, dispatch_send hook event wait", flush=True)
 
-        packed_recv_x, handles[1], event, a2e_isend_hook = buffer.a2e_isend_two_stage_v3(
+        packed_recv_x, handles[0], event, a2e_isend_hook = buffer.a2e_isend_two_stage_v3(
             x,
             topk_idx,
             topk_weights,
@@ -202,6 +205,7 @@ def test_main(
             use_fp8=use_fp8,
         )
         print(f"rank: {rank}, dispatch_send", flush=True)
+        print(f"===  rank:{rank}  a2e stage 4 send x :{x} ===", flush=True)
 
         event.current_stream_wait()
         print(f"rank: {rank}, dispatch_send event wait", flush=True)
@@ -236,12 +240,12 @@ def test_main(
         print(f"rank: {rank}, dispatch hook", flush=True)
         a2e_irecv_hook_event.current_stream_wait()
         print(f"rank: {rank}, dispatch hook wait", flush=True)
-
+        print(f"===  rank:{rank} a2e stage 1 recv x :{packed_recv_x} ===", flush=True)
         (
             packed_recv_x,
             packed_recv_count,
             rdma_send_flags,
-            handles[0],
+            handles[1],
             event,
             a2e_irecv_hook,
         ) = buffer.a2e_irecv_two_stage_v3(
@@ -271,6 +275,7 @@ def test_main(
             dispatch_use_fp8=use_fp8,
             out=None,
         )
+        print(f"===  rank:{rank} e2a stage 1 send x :{simulated_gemm_x}  ===")
         print(f"rank: {rank}, combine", flush=True)
 
         event.current_stream_wait()
@@ -279,7 +284,7 @@ def test_main(
         print(f"rank: {rank}, dispatch hook", flush=True)
         a2e_irecv_hook_event.current_stream_wait()
         print(f"rank: {rank}, dispatch hook wait", flush=True)
-
+        print(f"=== rank:{rank} a2e stage 2 recv x :{packed_recv_x} ===", flush=True)
         (
             packed_recv_x,
             packed_recv_count,
@@ -317,10 +322,11 @@ def test_main(
         e2a_event, e2a_isend_hook = buffer.e2a_isend_two_stage_v3(
             simulated_gemm_x, 
             num_topk,
-            handles[0],
+            handles[1],
             dispatch_use_fp8=use_fp8,
             out=None,
         )
+        print(f"===  rank:{rank} e2a stage 2 send x :{simulated_gemm_x}  ===")
         print(f"rank: {rank}, combine", flush=True)
 
         event.current_stream_wait()
@@ -329,12 +335,12 @@ def test_main(
         print(f"rank: {rank}, dispatch hook", flush=True)
         a2e_irecv_hook_event.current_stream_wait()
         print(f"rank: {rank}, dispatch hook wait", flush=True)
-
+        print(f"===  rank:{rank} a2e stage 3 recv x :{packed_recv_x} ===", flush=True)
         (
             packed_recv_x,
             packed_recv_count,
             rdma_send_flags,
-            handles[0],
+            handles[1],
             event,
             a2e_irecv_hook,
         ) = buffer.a2e_irecv_two_stage_v3(
@@ -363,7 +369,7 @@ def test_main(
         print(f"rank: {rank}, dispatch hook", flush=True)
         a2e_irecv_hook_event.current_stream_wait()
         print(f"rank: {rank}, dispatch hook wait", flush=True)
-
+        print(f"===  rank:{rank} a2e stage 4 recv x :{packed_recv_x} ===", flush=True)
         # 2_2
         moe(num_tokens, hidden)
         print(f"rank: {rank}, moe 2_2", flush=True)
