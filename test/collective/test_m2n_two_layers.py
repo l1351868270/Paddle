@@ -217,9 +217,10 @@ def test_main(
 
     if rank >= e_start_rank and rank < e_start_rank + e_num_ranks:  
         dist.barrier()
+        packed_recv_x_list = [None] * 3
         handles = [None] * 3
         (
-            packed_recv_x,
+            packed_recv_x_list[0],
             packed_recv_count,
             rdma_send_flags,
             handles[0],
@@ -240,9 +241,9 @@ def test_main(
         print(f"rank: {rank}, dispatch hook", flush=True)
         a2e_irecv_hook_event.current_stream_wait()
         print(f"rank: {rank}, dispatch hook wait", flush=True)
-        print(f"===  rank:{rank} a2e stage 1 recv x :{packed_recv_x} ===", flush=True)
+        print(f"===  rank:{rank} a2e stage 1 recv x :{packed_recv_x_list[0]} ===", flush=True)
         (
-            packed_recv_x,
+            packed_recv_x_list[1],
             packed_recv_count,
             rdma_send_flags,
             handles[1],
@@ -263,11 +264,11 @@ def test_main(
 
         if use_fp8:
             simulated_gemm_x = per_token_cast_back(
-                packed_recv_x[0].view((-1, hidden)),
-                packed_recv_x[1].contiguous().view((-1, hidden // 128)),
-            ).view(packed_recv_x[0].shape)
+                packed_recv_x_list[0][0].view((-1, hidden)),
+                packed_recv_x_list[0][1].contiguous().view((-1, hidden // 128)),
+            ).view(packed_recv_x_list[0][0].shape)
         else:
-            simulated_gemm_x = packed_recv_x.clone()
+            simulated_gemm_x = packed_recv_x_list[0].clone()
         e2a_event, e2a_isend_hook = buffer.e2a_isend_two_stage_v3(
             simulated_gemm_x, 
             num_topk,
@@ -284,9 +285,9 @@ def test_main(
         print(f"rank: {rank}, dispatch hook", flush=True)
         a2e_irecv_hook_event.current_stream_wait()
         print(f"rank: {rank}, dispatch hook wait", flush=True)
-        print(f"=== rank:{rank} a2e stage 2 recv x :{packed_recv_x} ===", flush=True)
+        print(f"=== rank:{rank} a2e stage 2 recv x :{packed_recv_x_list[1]} ===", flush=True)
         (
-            packed_recv_x,
+            packed_recv_x_list[0],
             packed_recv_count,
             rdma_send_flags,
             handles[0],
@@ -314,11 +315,11 @@ def test_main(
 
         if use_fp8:
             simulated_gemm_x = per_token_cast_back(
-                packed_recv_x[0].view((-1, hidden)),
-                packed_recv_x[1].contiguous().view((-1, hidden // 128)),
-            ).view(packed_recv_x[0].shape)
+                packed_recv_x_list[1][0].view((-1, hidden)),
+                packed_recv_x_list[1][1].contiguous().view((-1, hidden // 128)),
+            ).view(packed_recv_x_list[1][0].shape)
         else:
-            simulated_gemm_x = packed_recv_x.clone()
+            simulated_gemm_x = packed_recv_x_list[1].clone()
         e2a_event, e2a_isend_hook = buffer.e2a_isend_two_stage_v3(
             simulated_gemm_x, 
             num_topk,
@@ -335,9 +336,9 @@ def test_main(
         print(f"rank: {rank}, dispatch hook", flush=True)
         a2e_irecv_hook_event.current_stream_wait()
         print(f"rank: {rank}, dispatch hook wait", flush=True)
-        print(f"===  rank:{rank} a2e stage 3 recv x :{packed_recv_x} ===", flush=True)
+        print(f"===  rank:{rank} a2e stage 3 recv x :{packed_recv_x_list[0]} ===", flush=True)
         (
-            packed_recv_x,
+            packed_recv_x_list[0],
             packed_recv_count,
             rdma_send_flags,
             handles[1],
@@ -369,7 +370,7 @@ def test_main(
         print(f"rank: {rank}, dispatch hook", flush=True)
         a2e_irecv_hook_event.current_stream_wait()
         print(f"rank: {rank}, dispatch hook wait", flush=True)
-        print(f"===  rank:{rank} a2e stage 4 recv x :{packed_recv_x} ===", flush=True)
+        print(f"===  rank:{rank} a2e stage 4 recv x :{packed_recv_x_list[0]} ===", flush=True)
         # 2_2
         moe(num_tokens, hidden)
         print(f"rank: {rank}, moe 2_2", flush=True)
