@@ -58,7 +58,11 @@ def test_main(
         num_ranks - rank_offset < 257
     ), 'Too many ranks (exceeding test precision limit)'
 
-    
+    GB = 192
+    MB = 64
+    num_micro_batches = GB // MB # 3
+    num_hidden_layers = 3
+    moe_layer_start_index = 0
     if rank >= a_start_rank and rank < a_start_rank + a_num_ranks:
         x = paddle.ones((num_tokens, hidden), dtype="bfloat16") * (
             rank + 1
@@ -74,235 +78,55 @@ def test_main(
         e2a_recv_result = [None] * 3
 
         dist.barrier()
-        # stage 1
-        attention(num_tokens, hidden)
-        # _, handles[0], a2e_event, a2e_isend_hook = buffer.a2e_isend_two_stage_v3(
-        a2e_send_result[0] = buffer.a2e_isend_two_stage_v3(
-
-            x,
-            topk_idx,
-            topk_weights,
-            num_max_tokens,
-            num_experts,
-            use_fp8=use_fp8,
-        )
-
-        # stage 2
-        attention(num_tokens, hidden)
-        _, handles_0, a2e_event_0, a2e_isend_hook_0 = a2e_send_result[0]
-        a2e_event_0.current_stream_wait()
-        a2e_isend_hook_event_0 = a2e_isend_hook_0()
-        a2e_isend_hook_event_0.current_stream_wait()
-        a2e_send_result[1] = buffer.a2e_isend_two_stage_v3(
-            x,
-            topk_idx,
-            topk_weights,
-            num_max_tokens,
-            num_experts,
-            use_fp8=use_fp8,
-        )
-
-        # e2a_x, e2a_event, e2a_irecv_hook = buffer.e2a_irecv_two_stage_v3(
-        e2a_recv_result[1] = buffer.e2a_irecv_two_stage_v3(
-            topk_idx,
-            topk_weights,
-            handles_0,
-            dispatch_use_fp8=use_fp8,
-            out=None,
-        )
-
-        # stage 3
-        attention(num_tokens, hidden)
-        _, handles_1, a2e_event_1, a2e_isend_hook_1 = a2e_send_result[1]
-        a2e_event_1.current_stream_wait()
-        a2e_isend_hook_event_1 = a2e_isend_hook_1()
-        a2e_isend_hook_event_1.current_stream_wait()
-        a2e_send_result[2] = buffer.a2e_isend_two_stage_v3(
-            x,
-            topk_idx,
-            topk_weights,
-            num_max_tokens,
-            num_experts,
-            use_fp8=use_fp8,
-        )
-
-        e2a_x_1, e2a_event_1, e2a_irecv_hook_1  = e2a_recv_result[1]
-        e2a_event_1.current_stream_wait()
-        e2a_irecv_hook_event_1 = e2a_irecv_hook_1()
-        e2a_irecv_hook_event_1.current_stream_wait()
-        e2a_recv_result[2] = buffer.e2a_irecv_two_stage_v3(
-            topk_idx,
-            topk_weights,
-            handles_1,
-            dispatch_use_fp8=use_fp8,
-            out=None,
-        )
+ 
         # loop
-        for idx in range (0, 60):
-            pre_mb = (idx + 2) %3
-            mb = idx % 3
-            # moe
-            attention(num_tokens, hidden)
+        for idx in range (moe_layer_start_index * num_micro_batches, num_hidden_layers * num_micro_batches):
+            a2e_layer_idx_pre = (idx - 1) // 3
+            a2e_mb_idx_pre = (idx - 1) % 3
+            a2e_layer_idx = idx // 3
+            a2e_mb_idx = idx % 3
 
-            # a2e wait
-            _, handles, a2e_event, a2e_isend_hook = a2e_send_result[pre_mb]
-            a2e_event.current_stream_wait()
-            a2e_isend_hook_event = a2e_isend_hook()
-            a2e_isend_hook_event.current_stream_wait()
+            e2a_layer_idx = (idx - 2) // 3
+            e2a_mb_idx = (idx - 2) % 3
+            e2a_layer_idx_next = (idx - 1) // 3
+            e2a_mb_idx_next = (idx - 1) % 3
+            # attention
+            print(f"compute attention {a2e_mb_idx}_{a2e_layer_idx}", flush=True)
+            if a2e_layer_idx_pre >=  moe_layer_start_index:
+                print(f"send attention {a2e_mb_idx_pre}_{a2e_layer_idx_pre} data end", flush=True)
             
-            # a2e send
-            a2e_send_result[mb] = buffer.a2e_isend_two_stage_v3(
-                x,
-                topk_idx,
-                topk_weights,
-                num_max_tokens,
-                num_experts,
-                use_fp8=use_fp8,
-            )
+            print(f"send attention {a2e_mb_idx}_{a2e_layer_idx} data begin", flush=True)
+
+            if e2a_layer_idx >=  moe_layer_start_index and e2a_layer_idx < num_hidden_layers:
+                print(f"recv moe {e2a_mb_idx}_{e2a_layer_idx} data end", flush=True)
             
-            # e2a wait
-            e2a_x, e2a_event, e2a_irecv_hook  = e2a_recv_result[pre_mb]
-            e2a_event.current_stream_wait()
-            e2a_irecv_hook_event = e2a_irecv_hook()
-            e2a_irecv_hook_event.current_stream_wait()
-            
-            # e2a recv
-            e2a_recv_result[mb] = buffer.e2a_irecv_two_stage_v3(
-                topk_idx,
-                topk_weights,
-                handles,
-                dispatch_use_fp8=use_fp8,
-                out=None,
-            )
+            if e2a_layer_idx_next >=  moe_layer_start_index and e2a_layer_idx_next < num_hidden_layers:
+                print(f"recv moe {e2a_mb_idx_next}_{e2a_layer_idx_next} data begin", flush=True)
+        print(f"send attention {a2e_mb_idx}_{a2e_layer_idx} data end", flush=True)
 
     if rank >= e_start_rank and rank < e_start_rank + e_num_ranks:  
         dist.barrier()
-
-        a2e_recv_result = [None] * 3
-        e2a_send_result = [None] * 3
-        # stage 1
-        #     packed_recv_x_list[0],
-        #     packed_recv_count,
-        #     rdma_send_flags,
-        #     handles[0],
-        #     event,
-        #     a2e_irecv_hook,
-        a2e_recv_result[0] = buffer.a2e_irecv_two_stage_v3(
-            hidden,
-            num_topk,
-            num_max_tokens,
-            num_experts,
-            use_fp8=use_fp8,
-        )
-        packed_recv_x, packed_recv_count, rdma_send_flags, handles, event, a2e_irecv_hook = a2e_recv_result[0]
-        event.current_stream_wait()
-        a2e_irecv_hook_event = a2e_irecv_hook()
-        a2e_irecv_hook_event.current_stream_wait()
-
-        moe(num_tokens, hidden)
-        # e2a_event, e2a_isend_hook = buffer.e2a_isend_two_stage_v3(
-        e2a_send_result[0] = buffer.e2a_isend_two_stage_v3(
-            packed_recv_x.clone(), 
-            num_topk,
-            handles,
-            dispatch_use_fp8=use_fp8,
-            out=None,
-        )
-        a2e_recv_result[0] = buffer.a2e_irecv_two_stage_v3(
-            hidden,
-            num_topk,
-            num_max_tokens,
-            num_experts,
-            use_fp8=use_fp8,
-        )
-        # stage 2
-        moe(num_tokens, hidden)
-        e2a_event, e2a_isend_hook = e2a_send_result[0]
-        e2a_event.current_stream_wait()
-        e2a_isend_event = e2a_isend_hook()
-        e2a_isend_event.current_stream_wait()
-        
-        packed_recv_x, packed_recv_count, rdma_send_flags, handles, event, a2e_irecv_hook = a2e_recv_result[0]
-        e2a_send_result[1] = buffer.e2a_isend_two_stage_v3(
-            packed_recv_x.clone(), 
-            num_topk,
-            handles,
-            dispatch_use_fp8=use_fp8,
-            out=None,
-        )
-        packed_recv_x, packed_recv_count, rdma_send_flags, handles, event, a2e_irecv_hook = a2e_recv_result[0]
-        event.current_stream_wait()
-        a2e_irecv_hook_event = a2e_irecv_hook()
-        a2e_irecv_hook_event.current_stream_wait()
-        a2e_recv_result[1] = buffer.a2e_irecv_two_stage_v3(
-            hidden,
-            num_topk,
-            num_max_tokens,
-            num_experts,
-            use_fp8=use_fp8,
-        )
-
-        # stage 3
-        moe(num_tokens, hidden)
-        e2a_event, e2a_isend_hook = e2a_send_result[1]
-        e2a_event.current_stream_wait()
-        e2a_isend_event = e2a_isend_hook()
-        e2a_isend_event.current_stream_wait()
-        e2a_send_result[2] = buffer.e2a_isend_two_stage_v3(
-            packed_recv_x.clone(), 
-            num_topk,
-            handles,
-            dispatch_use_fp8=use_fp8,
-            out=None,
-        )
-        packed_recv_x, packed_recv_count, rdma_send_flags, handles, event, a2e_irecv_hook = a2e_recv_result[1]
-        event.current_stream_wait()
-        a2e_irecv_hook_event = a2e_irecv_hook()
-        a2e_irecv_hook_event.current_stream_wait()        
-        a2e_recv_result[2] = buffer.a2e_irecv_two_stage_v3(
-            hidden,
-            num_topk,
-            num_max_tokens,
-            num_experts,
-            use_fp8=use_fp8,
-        )
-       
         # loop
-        for idx in range (0, 60):
-            pre_mb = (idx + 2) % 3
-            mb = idx % 3
-            # moe
-            moe(num_tokens, hidden)
-            # e2a wait
-            e2a_event, e2a_isend_hook = e2a_send_result[pre_mb]
-            e2a_event.current_stream_wait()
-            e2a_isend_event = e2a_isend_hook()
-            e2a_isend_event.current_stream_wait()
+        print(f"recv attention {0}_{moe_layer_start_index} data begin", flush=True)
+        for idx in range (moe_layer_start_index * num_micro_batches, num_hidden_layers * num_micro_batches):
+            a2e_layer_idx = idx // 3
+            a2e_mb_idx = idx % 3
+            a2e_layer_idx_next = (idx + 1) // 3
+            a2e_mb_idx_next = (idx + 1) % 3
 
-            # e2a send
-            packed_recv_x, packed_recv_count, rdma_send_flags, handles, event, a2e_irecv_hook = a2e_recv_result[pre_mb]
-            e2a_send_result[mb] = buffer.e2a_isend_two_stage_v3(
-                packed_recv_x.clone(), 
-                num_topk,
-                handles,
-                dispatch_use_fp8=use_fp8,
-                out=None,
-            )
+            e2a_layer_idx_pre = (idx - 1) // 3
+            e2a_mb_idx_pre = (idx - 1) % 3
+            e2a_layer_idx_pre_pre = (idx - 2) // 3
+            e2a_mb_idx_pre_pre = (idx - 2) % 3
+            # attention
+            if e2a_layer_idx_pre_pre >=  moe_layer_start_index:
+                print(f"send moe {e2a_mb_idx_pre_pre}_{e2a_layer_idx_pre_pre} data end", flush=True)
+            if e2a_layer_idx_pre >= moe_layer_start_index:
+                print(f"send moe {e2a_mb_idx_pre}_{e2a_layer_idx_pre} data begin", flush=True)
+            print(f"recv attention {a2e_mb_idx}_{a2e_layer_idx} data end", flush=True)
+            print(f"recv attention {a2e_mb_idx_next}_{a2e_layer_idx_next} data begin", flush=True)
+            print(f"compute moe {a2e_mb_idx}_{a2e_layer_idx}", flush=True)            
 
-            # a2e wait
-            packed_recv_x, packed_recv_count, rdma_send_flags, handles, event, a2e_irecv_hook = a2e_recv_result[pre_mb]
-            event.current_stream_wait()
-            a2e_irecv_hook_event = a2e_irecv_hook()
-            a2e_irecv_hook_event.current_stream_wait()        
-
-            # a2e recv
-            a2e_recv_result[mb] = buffer.a2e_irecv_two_stage_v3(
-                hidden,
-                num_topk,
-                num_max_tokens,
-                num_experts,
-                use_fp8=use_fp8,
-            )
     dist.barrier()
 
 def test_loop():
