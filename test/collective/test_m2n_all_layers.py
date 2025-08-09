@@ -61,7 +61,7 @@ def test_main(
     GB = 192
     MB = 64
     num_micro_batches = GB // MB # 3
-    num_hidden_layers = 2
+    num_hidden_layers = 3
     moe_layer_start_index = 0
     # 整体思路
     # 1. 单层循环
@@ -80,64 +80,131 @@ def test_main(
         topk_weights = paddle.ones((num_tokens, num_topk), dtype="float32").abs_()
         print("x: ", x, flush=True)
 
-        a2e_send_result = [None] * 3
-        e2a_recv_result = [None] * 3
+        a2e_send_result = [None] * num_micro_batches
+        e2a_recv_result = [None] * num_micro_batches
 
         dist.barrier()
  
         # loop
         for idx in range (moe_layer_start_index * num_micro_batches, num_hidden_layers * num_micro_batches):
-            a2e_layer_idx_pre = (idx - 1) // 3
-            a2e_mb_idx_pre = (idx - 1) % 3
-            a2e_layer_idx = idx // 3
-            a2e_mb_idx = idx % 3
+            a2e_layer_idx_pre = (idx - 1) // num_micro_batches
+            a2e_mb_idx_pre = (idx - 1) % num_micro_batches
+            a2e_layer_idx = idx // num_micro_batches
+            a2e_mb_idx = idx % num_micro_batches
 
-            e2a_layer_idx = (idx - 2) // 3
-            e2a_mb_idx = (idx - 2) % 3
-            e2a_layer_idx_next = (idx - 1) // 3
-            e2a_mb_idx_next = (idx - 1) % 3
+            e2a_layer_idx = (idx - num_micro_batches + 1) // num_micro_batches
+            e2a_mb_idx = (idx - num_micro_batches + 1) % num_micro_batches
+            e2a_layer_idx_next = (idx - num_micro_batches + 2) // num_micro_batches
+            e2a_mb_idx_next = (idx - num_micro_batches + 2) % num_micro_batches
             # attention
+            attention(num_tokens, hidden)
             print(f"====== compute attention {a2e_mb_idx}_{a2e_layer_idx}", flush=True)
+            
             # attn 等待上一个micro batch数据接收完
             if a2e_layer_idx_pre >=  moe_layer_start_index:
-                print(f"send attention {a2e_mb_idx_pre}_{a2e_layer_idx_pre} data end", flush=True)
+                _, _, event, hook = a2e_send_result[a2e_mb_idx_pre]
+                event.current_stream_wait()
+                hook().current_stream_wait()
+                print(f"dispatch send wait attention {a2e_mb_idx_pre}_{a2e_layer_idx_pre} data end", flush=True)
+            
             # attn 每一个micro batch均发送数据
-            print(f"send attention {a2e_mb_idx}_{a2e_layer_idx} data begin", flush=True)
+            a2e_send_result[a2e_mb_idx] = buffer.a2e_isend_two_stage_v3(
+                x,
+                topk_idx,
+                topk_weights,
+                num_max_tokens,
+                num_experts,
+                use_fp8=use_fp8,
+            )
+            print(f"dispatch send attention {a2e_mb_idx}_{a2e_layer_idx} data begin", flush=True)
+            
             # attn 最后一层不在接收数据
             if e2a_layer_idx >=  moe_layer_start_index and e2a_layer_idx < num_hidden_layers - 1:
-                print(f"recv moe {e2a_mb_idx}_{e2a_layer_idx} data end", flush=True)
+                _, event, hook  = e2a_recv_result[e2a_mb_idx]
+                event.current_stream_wait()
+                hook().current_stream_wait()
+                print(f"combine recv wait moe {e2a_mb_idx}_{e2a_layer_idx} data end", flush=True)
+            
             # attn 最后一层不在接收数据
             if e2a_layer_idx_next >=  moe_layer_start_index and e2a_layer_idx_next < num_hidden_layers - 1:
-                print(f"recv moe {e2a_mb_idx_next}_{e2a_layer_idx_next} data begin", flush=True)
-        print(f"send attention {a2e_mb_idx}_{a2e_layer_idx} data end", flush=True)
+                _, handle, _, _ = a2e_send_result[e2a_mb_idx_next]
+                e2a_recv_result[e2a_mb_idx_next] = buffer.e2a_irecv_two_stage_v3(
+                    topk_idx,
+                    topk_weights,
+                    handle,
+                    dispatch_use_fp8=use_fp8,
+                    out=None,
+                )
+                print(f"combine recv moe {e2a_mb_idx_next}_{e2a_layer_idx_next} data begin", flush=True)
+        
+        # 最后一个micro batch循环不到，单独处理
+        _, _, event, hook = a2e_send_result[a2e_mb_idx]
+        event.current_stream_wait()
+        hook().current_stream_wait()
+        print(f"dispatch send wait attention {a2e_mb_idx}_{a2e_layer_idx} data end", flush=True)
 
     if rank >= e_start_rank and rank < e_start_rank + e_num_ranks:  
+        a2e_recv_result = [None] * num_micro_batches
+        e2a_send_result = [None] * num_micro_batches
+
         dist.barrier()
         # loop
         # moe 第一次启动接收数据
-        print(f"recv attention {0}_{moe_layer_start_index} data begin", flush=True)
+        a2e_recv_result[0] = buffer.a2e_irecv_two_stage_v3(
+            hidden,
+            num_topk,
+            num_max_tokens,
+            num_experts,
+            use_fp8=use_fp8,
+        )
+        print(f"dispatch recv wait attention {0}_{moe_layer_start_index} data begin", flush=True)
         for idx in range (moe_layer_start_index * num_micro_batches, num_hidden_layers * num_micro_batches):
-            a2e_layer_idx = idx // 3
-            a2e_mb_idx = idx % 3
-            a2e_layer_idx_next = (idx + 1) // 3
-            a2e_mb_idx_next = (idx + 1) % 3
+            a2e_layer_idx = idx // num_micro_batches
+            a2e_mb_idx = idx % num_micro_batches
+            a2e_layer_idx_next = (idx + 1) // num_micro_batches
+            a2e_mb_idx_next = (idx + 1) % num_micro_batches
 
-            e2a_layer_idx_pre = (idx - 1) // 3
-            e2a_mb_idx_pre = (idx - 1) % 3
-            e2a_layer_idx_pre_pre = (idx - 2) // 3
-            e2a_mb_idx_pre_pre = (idx - 2) % 3
+            e2a_layer_idx_pre = (idx - 1) // num_micro_batches
+            e2a_mb_idx_pre = (idx - 1) % num_micro_batches
+            e2a_layer_idx_pre_pre = (idx - 2) // num_micro_batches
+            e2a_mb_idx_pre_pre = (idx - 2) % num_micro_batches
+            
             # moe 最后一层不发送数据
             # moe 等待上上一个micro batch的数据
             if e2a_layer_idx_pre_pre >=  moe_layer_start_index and e2a_layer_idx_pre_pre < num_hidden_layers - 1:
-                print(f"send moe {e2a_mb_idx_pre_pre}_{e2a_layer_idx_pre_pre} data end", flush=True)
+                event, hook = e2a_send_result[e2a_mb_idx_pre_pre]
+                event.current_stream_wait()
+                hook().current_stream_wait()
+                print(f"combine send wait moe {e2a_mb_idx_pre_pre}_{e2a_layer_idx_pre_pre} data end", flush=True)
+            
             # moe 启动发送上一个micro batch的数据
             if e2a_layer_idx_pre >= moe_layer_start_index and e2a_layer_idx_pre < num_hidden_layers - 1:
-                print(f"send moe {e2a_mb_idx_pre}_{e2a_layer_idx_pre} data begin", flush=True)
+                packed_recv_x, packed_recv_count, rdma_send_flags, handle, _, _ = a2e_recv_result[e2a_mb_idx_pre]
+                e2a_send_result[e2a_mb_idx_pre] = buffer.e2a_isend_two_stage_v3(
+                    packed_recv_x.clone(), 
+                    num_topk,
+                    handle,
+                    dispatch_use_fp8=use_fp8,
+                    out=None,
+                )
+                print(f"combine send moe {e2a_mb_idx_pre}_{e2a_layer_idx_pre} data begin", flush=True)
+            
             # moe 每一个micro batch 都等待数据接收完
-            print(f"recv attention {a2e_mb_idx}_{a2e_layer_idx} data end", flush=True)
+            packed_recv_x, packed_recv_count, rdma_send_flags, _, event, hook = a2e_recv_result[a2e_mb_idx]
+            event.current_stream_wait()
+            hook().current_stream_wait()
+            print(f"dispatch recv wait attention {a2e_mb_idx}_{a2e_layer_idx} data end", flush=True)
             # moe 最后一个micro batch不再启动接收下一个数据
             if idx < num_hidden_layers * num_micro_batches - 1:
-                print(f"recv attention {a2e_mb_idx_next}_{a2e_layer_idx_next} data begin", flush=True)
+                a2e_recv_result[a2e_mb_idx_next] = buffer.a2e_irecv_two_stage_v3(
+                    hidden,
+                    num_topk,
+                    num_max_tokens,
+                    num_experts,
+                    use_fp8=use_fp8,
+                )
+                print(f"dispatch recv attention {a2e_mb_idx_next}_{a2e_layer_idx_next} data begin", flush=True)
+            moe(num_tokens, hidden)
             print(f"====== compute moe {a2e_mb_idx}_{a2e_layer_idx}", flush=True)            
 
     dist.barrier()

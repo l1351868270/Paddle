@@ -360,7 +360,9 @@ __global__ __launch_bounds__(
       }
       auto lsl_flag = ld_acquire_sys_global(
           rdma_recv_complete + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id);
-      printf("[kernel][dispatch] src_rdma_rank: %d, flag: %d\n", src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, lsl_flag);
+      if (thread_id == 0) {
+          printf("[kernel][dispatch] src_rdma_rank: %d, flag: %d\n", src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, lsl_flag);
+      }
       rdma_recv_complete[src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id] = 0;
     }
     return;
@@ -1108,7 +1110,9 @@ __global__ __launch_bounds__(
       }
       auto lsl_flag = ld_acquire_sys_global(
           rdma_recv_complete + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id);
-      printf("[kernel][combine][wait] src_rdma_rank: %d, flag: %d\n", src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, lsl_flag);
+      if (thread_id == 0) {
+          printf("[kernel][combine][wait] src_rdma_rank: %d, flag: %d\n", src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, lsl_flag);
+      }
       rdma_recv_complete[src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id] = 0;
     }
     return;
