@@ -63,6 +63,12 @@ def test_main(
     num_micro_batches = GB // MB # 3
     num_hidden_layers = 2
     moe_layer_start_index = 0
+    # 整体思路
+    # 1. 单层循环
+    # 2. 以计算index为基准，通信index进行相应的偏移
+    # 3. a2e 计算放到循环的开始位置, 最后一个micro batch循环不到, 放到循环结束单独处理
+    # 4. e2a 计算放到循环的结束位置, 第一micro batch循环不到，放到循环开始之前单独处理
+    # 5. 只在通信index有效的位置进行通信操作
     if rank >= a_start_rank and rank < a_start_rank + a_num_ranks:
         x = paddle.ones((num_tokens, hidden), dtype="bfloat16") * (
             rank + 1
