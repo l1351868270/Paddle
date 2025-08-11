@@ -61,7 +61,7 @@ def test_main(
     GB = 192
     MB = 64
     num_micro_batches = GB // MB # 3
-    num_hidden_layers = 3
+    num_hidden_layers = 51
     moe_layer_start_index = 0
     # 整体思路
     # 1. 单层循环
@@ -106,9 +106,9 @@ def test_main(
                 event.current_stream_wait()
                 hook().current_stream_wait()
                 print(f"dispatch send wait attention {a2e_mb_idx_pre}_{a2e_layer_idx_pre} data end", flush=True)
-            
+                
             # attn 每一个micro batch均发送数据
-            a2e_send_result[a2e_mb_idx] = buffer.a2e_isend_two_stage_v3(
+            tmp = buffer.a2e_isend_two_stage_v3(
                 x,
                 topk_idx,
                 topk_weights,
@@ -136,7 +136,7 @@ def test_main(
                     out=None,
                 )
                 print(f"combine recv moe {e2a_mb_idx_next}_{e2a_layer_idx_next} data begin", flush=True)
-        
+            a2e_send_result[a2e_mb_idx] = tmp
         # 最后一个micro batch循环不到，单独处理
         _, _, event, hook = a2e_send_result[a2e_mb_idx]
         event.current_stream_wait()
