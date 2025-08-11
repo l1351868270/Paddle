@@ -28,6 +28,8 @@ namespace deep_ep {
 
 namespace m2n_ll_two_stage {
 
+constexpr bool M2N_LL_DEBUG = false;
+
 template <bool kUseFP8,
           int kNumWarpGroups,
           int kNumWarpsPerGroup,
@@ -86,7 +88,10 @@ __global__ __launch_bounds__(
   const auto warp_group_id = warp_id / kNumWarpsPerGroup;
   const auto sub_warp_id = warp_id % kNumWarpsPerGroup;
   const auto responsible_expert_idx = sm_id * kNumWarpGroups + warp_group_id;
-
+  int a_start_rdma_rank = a_start_rank / NUM_MAX_NVL_PEERS;
+  int a_num_rdma_ranks = a_num_ranks / NUM_MAX_NVL_PEERS;
+  int e_start_rdma_rank = e_start_rank / NUM_MAX_NVL_PEERS;
+  int e_num_rdma_ranks = e_num_ranks / NUM_MAX_NVL_PEERS;
   // if (thread_id == 0) {
   //   printf("[kernel][rank: %d] a_start_rank: %d, a_num_ranks: %d, e_start_rank: %d, e_num_ranks: %d\n", rank, a_start_rank, a_num_ranks, e_start_rank, e_num_ranks);
   // }
@@ -353,9 +358,12 @@ __global__ __launch_bounds__(
       int src_rdma_rank = sm_id + e_start_rdma_rank;
       auto lsl_flag_before = ld_acquire_sys_global(
           rdma_recv_complete + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id);
-      if (thread_id == 0) {
-        printf("[kernel][dispatch][wait] src_rdma_rank: %d, offset: %d, flag_before: %d\n", src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, lsl_flag_before);
+      if (M2N_LL_DEBUG) {
+        if (thread_id == 0) {
+          printf("[kernel][dispatch][wait] src_rdma_rank: %d, offset: %d, flag_before: %d\n", src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, lsl_flag_before);
+        }
       }
+      
       while ((ld_acquire_sys_global(
           rdma_recv_complete + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id)) ==
         0) {
@@ -364,8 +372,10 @@ __global__ __launch_bounds__(
           rdma_recv_complete + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id);
       
       rdma_recv_complete[src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id] = 0;
-      if (thread_id == 0) {
+      if (M2N_LL_DEBUG) {
+        if (thread_id == 0) {
           printf("[kernel][dispatch][wait][complete] src_rdma_rank: %d, flag: %d\n", src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, lsl_flag);
+        }
       }
     }
     return;
@@ -387,12 +397,16 @@ __global__ __launch_bounds__(
           src_rdma_rank * num_max_dispatch_tokens_per_rank * num_bytes_per_msg;
 
       __shared__ int shared_num_recv_tokens[1];
-      int num_recv_tokens_per_rdma;
+      int num_recv_tokens_per_rdma = -1;
       if (thread_id < kNumQPs) {
-        while ((num_recv_tokens_per_rdma = ld_acquire_sys_global(
+        // only read flag of attn mechine, if one machine is fast and one machine is slow, this will have hang in the last micro batch
+        if (src_rdma_rank >= a_start_rdma_rank and src_rdma_rank < a_start_rdma_rank + a_num_rdma_ranks) {
+          while ((num_recv_tokens_per_rdma = ld_acquire_sys_global(
                     rdma_recv_count + src_rdma_rank * kNumQPs + thread_id)) ==
                0) {
+          }
         }
+        
         if (thread_id == 0) {
           sub_rdma_rank == 0
               ? packed_rdma_recv_count[src_rdma_rank] = num_recv_tokens_per_rdma
@@ -610,10 +624,7 @@ __global__ __launch_bounds__(
   }
   // TODO: 
   if (rank >= e_start_rank && rank < e_start_rank + e_num_ranks) {
-    int a_num_rdma_rank = a_num_ranks / NUM_MAX_NVL_PEERS;
-    int a_start_rdma_rank = a_start_rank / NUM_MAX_NVL_PEERS;
-    int e_start_rdma_rank = e_start_rank / NUM_MAX_NVL_PEERS;
-    if (sm_id < a_num_rdma_rank && thread_id < NUM_MAX_NVL_PEERS) {
+    if (sm_id < a_num_rdma_ranks && thread_id < NUM_MAX_NVL_PEERS) {
       int dst_rdma_rank = sm_id + a_start_rdma_rank;
       auto dst_ptr = reinterpret_cast<uint64_t>(
           rdma_recv_complete + rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank);
@@ -623,8 +634,10 @@ __global__ __launch_bounds__(
           1,
           dst_rdma_rank * NUM_MAX_NVL_PEERS + thread_id,
           thread_id);
-      if (thread_id == 0) {
-        printf("[kernel][dispatch][complete] dst_rank: %d, offset: %d\n", dst_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank);
+      if (M2N_LL_DEBUG) {
+        if (thread_id == 0) {
+          printf("[kernel][dispatch][complete] dst_rank: %d, offset: %d\n", dst_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank);
+        }
       }
     }
   }
@@ -1104,15 +1117,14 @@ __global__ __launch_bounds__(
 
   // TODO:
   if (rank >= e_start_rank && rank < e_start_rank + e_num_ranks) {
-    int a_num_rdma_rank = a_num_ranks / NUM_MAX_NVL_PEERS;
-    int a_start_rdma_rank = a_start_rank / NUM_MAX_NVL_PEERS;
-    int e_start_rdma_rank = e_start_rank / NUM_MAX_NVL_PEERS;
-    if (sm_id < a_num_rdma_rank && thread_id < NUM_MAX_NVL_PEERS) {
+    if (sm_id < a_num_rdma_ranks && thread_id < NUM_MAX_NVL_PEERS) {
       int src_rdma_rank = sm_id + a_start_rdma_rank;
       auto lsl_flag_before = ld_acquire_sys_global(
           rdma_recv_complete + num_ranks + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id);
-      if (thread_id == 0) {
-        printf("[kernel][combine][wait] src_rdma_rank: %d, offset: %d, flag_before: %d\n", src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, num_ranks + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, lsl_flag_before);
+      if (M2N_LL_DEBUG) {
+        if (thread_id == 0) {
+          printf("[kernel][combine][wait] src_rdma_rank: %d, offset: %d, flag_before: %d\n", src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, num_ranks + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, lsl_flag_before);
+        }
       }
       while ((ld_acquire_sys_global(
           rdma_recv_complete + num_ranks + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id)) ==
@@ -1122,8 +1134,10 @@ __global__ __launch_bounds__(
           rdma_recv_complete + num_ranks + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id);
       
       rdma_recv_complete[num_ranks + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id] = 0;
-      if (thread_id == 0) {
+      if (M2N_LL_DEBUG) {
+        if (thread_id == 0) {
           printf("[kernel][combine][wait][complete] src_rdma_rank: %d, flag: %d\n", src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, lsl_flag);
+        }
       }
     }
     return;
@@ -1131,6 +1145,8 @@ __global__ __launch_bounds__(
 
   /* RDMA Receiver / RDMA Reducer */
   // Wait all rdma ranks to arrive
+  // only read flag of experts mechine, if one machine is fast and one machine is slow, this will have hang in the last micro batch
+
   if (sm_id >= e_start_rdma_rank and sm_id < e_start_rdma_rank + e_num_rdma_ranks and sm_id < kNumRdmaRanks) {
     if (thread_id < kNumQPs) {
       while (ld_acquire_sys_global(rdma_recv_flag + sm_id * kNumQPs +
@@ -1140,6 +1156,7 @@ __global__ __launch_bounds__(
       rdma_recv_flag[sm_id * kNumQPs + thread_id] = 0;
     }
   }
+
   cg::this_grid().sync();
 
   for (int g_id = thread_id; g_id < hidden_bf16_int4; g_id += num_threads) {
@@ -1187,8 +1204,10 @@ __global__ __launch_bounds__(
           1,
           dst_rdma_rank * NUM_MAX_NVL_PEERS + thread_id,
           thread_id);
-      if (thread_id == 0) {
-        printf("[kernel][combine][complete] dst_rank: %d, offset: %d\n", dst_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, num_ranks + rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank);
+      if (M2N_LL_DEBUG) {
+        if (thread_id == 0) {
+          printf("[kernel][combine][complete] dst_rank: %d, offset: %d\n", dst_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, num_ranks + rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank);
+        }
       }
     }
   }
