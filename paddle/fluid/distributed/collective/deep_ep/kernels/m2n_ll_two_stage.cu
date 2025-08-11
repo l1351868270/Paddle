@@ -845,6 +845,10 @@ __global__ __launch_bounds__(
   const auto warp_group_id = warp_id / kNumWarpsPerGroup;
   const auto sub_warp_id = warp_id % kNumWarpsPerGroup;
   const auto responsible_expert_idx = sm_id * kNumWarpGroups + warp_group_id;
+  int a_start_rdma_rank = a_start_rank / NUM_MAX_NVL_PEERS;
+  int a_num_rdma_ranks = a_num_ranks / NUM_MAX_NVL_PEERS;
+  int e_start_rdma_rank = e_start_rank / NUM_MAX_NVL_PEERS;
+  int e_num_rdma_ranks = e_num_ranks / NUM_MAX_NVL_PEERS;
 
   if (sm_id == 0 && thread_id == 0) {
     EP_DEVICE_ASSERT(ibgda_get_state()->num_rc_per_pe >= kNumQPs);
@@ -1127,7 +1131,7 @@ __global__ __launch_bounds__(
 
   /* RDMA Receiver / RDMA Reducer */
   // Wait all rdma ranks to arrive
-  if (sm_id < kNumRdmaRanks) {
+  if (sm_id >= e_start_rdma_rank and sm_id < e_start_rdma_rank + e_num_rdma_ranks and sm_id < kNumRdmaRanks) {
     if (thread_id < kNumQPs) {
       while (ld_acquire_sys_global(rdma_recv_flag + sm_id * kNumQPs +
                                    thread_id) == 0) {
