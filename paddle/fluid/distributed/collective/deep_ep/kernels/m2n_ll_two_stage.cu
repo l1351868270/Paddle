@@ -1106,18 +1106,18 @@ __global__ __launch_bounds__(
     if (sm_id < a_num_rdma_rank && thread_id < NUM_MAX_NVL_PEERS) {
       int src_rdma_rank = sm_id + a_start_rdma_rank;
       auto lsl_flag_before = ld_acquire_sys_global(
-          rdma_recv_complete + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id);
+          rdma_recv_complete + num_ranks + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id);
       if (thread_id == 0) {
-        printf("[kernel][combine][wait] src_rdma_rank: %d, offset: %d, flag_before: %d\n", src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, lsl_flag_before);
+        printf("[kernel][combine][wait] src_rdma_rank: %d, offset: %d, flag_before: %d\n", src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, num_ranks + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, lsl_flag_before);
       }
       while ((ld_acquire_sys_global(
-          rdma_recv_complete + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id)) ==
+          rdma_recv_complete + num_ranks + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id)) ==
         0) {
       }
       auto lsl_flag = ld_acquire_sys_global(
-          rdma_recv_complete + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id);
+          rdma_recv_complete + num_ranks + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id);
       
-      rdma_recv_complete[src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id] = 0;
+      rdma_recv_complete[num_ranks + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id] = 0;
       if (thread_id == 0) {
           printf("[kernel][combine][wait][complete] src_rdma_rank: %d, flag: %d\n", src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, lsl_flag);
       }
@@ -1176,7 +1176,7 @@ __global__ __launch_bounds__(
     if (sm_id < e_num_rdma_rank && thread_id < NUM_MAX_NVL_PEERS) {
       int dst_rdma_rank = sm_id + e_start_rdma_rank;
       auto dst_ptr = reinterpret_cast<uint64_t>(
-          rdma_recv_complete + rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank);
+          rdma_recv_complete + num_ranks + rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank);
       
       nvshmemi_ibgda_amo_nonfetch_add(
           reinterpret_cast<int*>(dst_ptr),
@@ -1184,7 +1184,7 @@ __global__ __launch_bounds__(
           dst_rdma_rank * NUM_MAX_NVL_PEERS + thread_id,
           thread_id);
       if (thread_id == 0) {
-        printf("[kernel][combine][complete] dst_rank: %d, offset: %d\n", dst_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank);
+        printf("[kernel][combine][complete] dst_rank: %d, offset: %d\n", dst_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, num_ranks + rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank);
       }
     }
   }
