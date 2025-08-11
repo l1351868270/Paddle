@@ -87,15 +87,15 @@ def test_main(
  
         # loop
         for idx in range (moe_layer_start_index * num_micro_batches, num_hidden_layers * num_micro_batches):
-            a2e_layer_idx_pre = (idx - 1) // num_micro_batches
-            a2e_mb_idx_pre = (idx - 1) % num_micro_batches
-            a2e_layer_idx = idx // num_micro_batches
-            a2e_mb_idx = idx % num_micro_batches
+            a2e_layer_idx_pre = (idx - 1) // num_micro_batches # idx - 1
+            a2e_mb_idx_pre = (idx - 1) % num_micro_batches # idx - 1
+            a2e_layer_idx = idx // num_micro_batches # idx
+            a2e_mb_idx = idx % num_micro_batches # idx
 
-            e2a_layer_idx = (idx - num_micro_batches + 1) // num_micro_batches
-            e2a_mb_idx = (idx - num_micro_batches + 1) % num_micro_batches
-            e2a_layer_idx_next = (idx - num_micro_batches + 2) // num_micro_batches
-            e2a_mb_idx_next = (idx - num_micro_batches + 2) % num_micro_batches
+            e2a_layer_idx = (idx - num_micro_batches + 1) // num_micro_batches # idx - 2
+            e2a_mb_idx = (idx - num_micro_batches + 1) % num_micro_batches # idx - 2
+            e2a_layer_idx_next = (idx - num_micro_batches + 2) // num_micro_batches # idx - 1
+            e2a_mb_idx_next = (idx - num_micro_batches + 2) % num_micro_batches # idx - 1
             # attention
             attention(num_tokens, hidden)
             print(f"====== compute attention {a2e_mb_idx}_{a2e_layer_idx}", flush=True)
@@ -120,9 +120,11 @@ def test_main(
             
             # attn 最后一层不在接收数据
             if e2a_layer_idx >=  moe_layer_start_index and e2a_layer_idx < num_hidden_layers - 1:
-                _, event, hook  = e2a_recv_result[e2a_mb_idx]
+                e2a_x, event, hook  = e2a_recv_result[e2a_mb_idx]
                 event.current_stream_wait()
                 hook().current_stream_wait()
+                paddle.device.synchronize()
+                # print(f"combine recv wait moe {e2a_mb_idx}_{e2a_layer_idx} data end, e2a_x: {e2a_x}", flush=True)
                 print(f"combine recv wait moe {e2a_mb_idx}_{e2a_layer_idx} data end", flush=True)
             
             # attn 最后一层不在接收数据
@@ -193,6 +195,15 @@ def test_main(
             packed_recv_x, packed_recv_count, rdma_send_flags, _, event, hook = a2e_recv_result[a2e_mb_idx]
             event.current_stream_wait()
             hook().current_stream_wait()
+            # if use_fp8:
+            #     simulated_gemm_x = per_token_cast_back(
+            #         packed_recv_x[0].view((-1, hidden)),
+            #         packed_recv_x[1].contiguous().view((-1, hidden // 128)),
+            #     ).view(packed_recv_x[0].shape)
+            # else:
+            #     simulated_gemm_x = packed_recv_x.clone()
+            paddle.device.synchronize()
+            # print(f"dispatch recv wait attention {a2e_mb_idx}_{a2e_layer_idx} data end, packed_recv_x: {packed_recv_x}", flush=True)
             print(f"dispatch recv wait attention {a2e_mb_idx}_{a2e_layer_idx} data end", flush=True)
             # moe 最后一个micro batch不再启动接收下一个数据
             if idx < num_hidden_layers * num_micro_batches - 1:
