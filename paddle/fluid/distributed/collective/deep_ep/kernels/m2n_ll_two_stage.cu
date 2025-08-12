@@ -29,6 +29,7 @@ namespace deep_ep {
 namespace m2n_ll_two_stage {
 
 constexpr bool M2N_LL_DEBUG = false;
+constexpr bool M2N_LL_HANG_DEBUG = true;
 
 template <bool kUseFP8,
           int kNumWarpGroups,
@@ -363,10 +364,22 @@ __global__ __launch_bounds__(
           printf("[kernel][dispatch][wait] src_rdma_rank: %d, offset: %d, flag_before: %d\n", src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, lsl_flag_before);
         }
       }
-      
+
+      auto start_time = clock64();
+      auto wait_recv_cost = clock64();
       while ((ld_acquire_sys_global(
           rdma_recv_complete + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id)) ==
         0) {
+        // debug info of dispatch wait
+        if (M2N_LL_HANG_DEBUG) {
+          if (thread_id == 0) {
+            wait_recv_cost = clock64() - start_time;
+            if (wait_recv_cost > 1000000000) {
+              printf("[kernel][dispatch][wait] wait than clock cycles: %ld\n", wait_recv_cost);
+              start_time = clock64();
+            }
+          }
+        }
       }
       auto lsl_flag = ld_acquire_sys_global(
           rdma_recv_complete + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id);
@@ -401,9 +414,20 @@ __global__ __launch_bounds__(
       if (thread_id < kNumQPs) {
         // only read flag of attn mechine, if one machine is fast and one machine is slow, this will have hang in the last micro batch
         if (src_rdma_rank >= a_start_rdma_rank and src_rdma_rank < a_start_rdma_rank + a_num_rdma_ranks) {
+          auto start_time = clock64();
+          auto wait_recv_cost = clock64();
           while ((num_recv_tokens_per_rdma = ld_acquire_sys_global(
                     rdma_recv_count + src_rdma_rank * kNumQPs + thread_id)) ==
                0) {
+            if (M2N_LL_HANG_DEBUG) {
+              if (thread_id == 0) {
+                wait_recv_cost = clock64() - start_time;
+                if (wait_recv_cost > 1000000000) {
+                  printf("[kernel][dispatch][rdma_recv_count] wait than clock cycles: %ld\n", wait_recv_cost);
+                  start_time = clock64();
+                }
+              }
+            }
           }
         }
         
@@ -1126,9 +1150,20 @@ __global__ __launch_bounds__(
           printf("[kernel][combine][wait] src_rdma_rank: %d, offset: %d, flag_before: %d\n", src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, num_ranks + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id, lsl_flag_before);
         }
       }
+      auto start_time = clock64();
+      auto wait_recv_cost = clock64();
       while ((ld_acquire_sys_global(
           rdma_recv_complete + num_ranks + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id)) ==
         0) {
+        if (M2N_LL_HANG_DEBUG) {
+          if (thread_id == 0) {
+            wait_recv_cost = clock64() - start_time;
+            if (wait_recv_cost > 1000000000) {
+              printf("[kernel][combine][wait] wait than clock cycles: %ld\n", wait_recv_cost);
+              start_time = clock64();
+            }
+          }
+        }
       }
       auto lsl_flag = ld_acquire_sys_global(
           rdma_recv_complete + num_ranks + src_rdma_rank * NUM_MAX_NVL_PEERS + thread_id);
@@ -1149,8 +1184,19 @@ __global__ __launch_bounds__(
 
   if (sm_id >= e_start_rdma_rank and sm_id < e_start_rdma_rank + e_num_rdma_ranks and sm_id < kNumRdmaRanks) {
     if (thread_id < kNumQPs) {
+      auto start_time = clock64();
+      auto wait_recv_cost = clock64();
       while (ld_acquire_sys_global(rdma_recv_flag + sm_id * kNumQPs +
                                    thread_id) == 0) {
+        if (M2N_LL_HANG_DEBUG) {
+          if (thread_id == 0) {
+            wait_recv_cost = clock64() - start_time;
+            if (wait_recv_cost > 1000000000) {
+              printf("[kernel][combine][rdma_recv_flag] wait than clock cycles: %ld\n", wait_recv_cost);
+              start_time = clock64();
+            }
+          }
+        }
       }
       // reset
       rdma_recv_flag[sm_id * kNumQPs + thread_id] = 0;
