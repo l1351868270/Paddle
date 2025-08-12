@@ -1004,7 +1004,7 @@ __global__ __launch_bounds__(
   if (responsible_expert_idx < num_experts) {
     EP_STATIC_ASSERT(kNumWarpsPerGroup > 1,
                      "Invalid number of warps per group");
-    if (sub_warp_id == 0 && lane_id == 0) {
+    if (rdma_rank >= e_start_rdma_rank && rdma_rank < e_start_rdma_rank + e_num_rdma_ranks && sub_warp_id == 0 && lane_id == 0) {
       auto start_time = clock64();
       auto wait_recv_cost = clock64();
       while (ld_acquire_sys_global(
