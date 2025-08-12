@@ -1350,7 +1350,7 @@ void combine(void* combined_x,
   const int num_rdma_ranks = num_ranks / NUM_MAX_NVL_PEERS;
 
   // Check workspace
-  auto atomic_clean_flag = reinterpret_cast<int*>(workspace);
+  auto atomic_clean_flag = reinterpret_cast<int*>(workspace + 32 * 1024 * 1024);
   auto atomic_nvl_sender_multi_sms = atomic_clean_flag + 1;
   EP_HOST_ASSERT((1 + num_rdma_ranks) * sizeof(int) <= NUM_WORKSPACE_BYTES);
   EP_HOST_ASSERT(num_topk <= kNumMaxTopk);
