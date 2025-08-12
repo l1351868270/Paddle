@@ -30,6 +30,7 @@ namespace m2n_ll_two_stage {
 
 constexpr bool M2N_LL_DEBUG = false;
 constexpr bool M2N_LL_HANG_DEBUG = true;
+constexpr int64_t M2N_NUM_HANG_CYCLES = 2000000000; // 345MHZ 5.8s;  
 
 template <bool kUseFP8,
           int kNumWarpGroups,
@@ -374,7 +375,7 @@ __global__ __launch_bounds__(
         if (M2N_LL_HANG_DEBUG) {
           if (thread_id == 0) {
             wait_recv_cost = clock64() - start_time;
-            if (wait_recv_cost > 1000000000) {
+            if (wait_recv_cost > M2N_NUM_HANG_CYCLES) {
               printf("[kernel][dispatch][wait] wait than clock cycles: %ld\n", wait_recv_cost);
               start_time = clock64();
             }
@@ -422,7 +423,7 @@ __global__ __launch_bounds__(
             if (M2N_LL_HANG_DEBUG) {
               if (thread_id == 0) {
                 wait_recv_cost = clock64() - start_time;
-                if (wait_recv_cost > 1000000000) {
+                if (wait_recv_cost > M2N_NUM_HANG_CYCLES) {
                   printf("[kernel][dispatch][rdma_recv_count] wait than clock cycles: %ld\n", wait_recv_cost);
                   start_time = clock64();
                 }
@@ -513,8 +514,19 @@ __global__ __launch_bounds__(
                            atomic_nvl_sender_multi_sms + src_rdma_rank, 1))
                      : 0;
       if (sub_rdma_rank == 0 && thread_id == 0) {
+        auto start_time = clock64();
+        auto wait_recv_cost = clock64();
         while (ld_acquire_global(atomic_nvl_sender_multi_sms + src_rdma_rank) !=
                sms_per_rdma) {
+          if (M2N_LL_HANG_DEBUG) {
+            if (thread_id == 0) {
+              wait_recv_cost = clock64() - start_time;
+              if (wait_recv_cost > M2N_NUM_HANG_CYCLES) {
+                printf("[kernel][dispatch][atomic_nvl_sender_multi_sms] wait than clock cycles: %ld\n", wait_recv_cost);
+                start_time = clock64();
+              }
+            }
+          }
         }
         atomic_nvl_sender_multi_sms[src_rdma_rank] = 0;
       }
@@ -578,11 +590,22 @@ __global__ __launch_bounds__(
     EP_STATIC_ASSERT(kNumWarpsPerGroup > 1,
                      "Requires more than one warp per group");
     if (sub_warp_id == 1 && lane_id == 0) {
+      auto start_time = clock64();
+      auto wait_recv_cost = clock64();
       while ((num_recv_tokens = ld_acquire_sys_global(
                   reinterpret_cast<int*>(
                       reinterpret_cast<uint8_t*>(nvl_recv_x[nvl_rank]) +
                       NVL_BUFFER_X_BYTES) +
                   local_expert_idx * kNumRanks + src_rank)) == 0) {
+        if (M2N_LL_HANG_DEBUG) {
+          if (thread_id == 0) {
+            wait_recv_cost = clock64() - start_time;
+            if (wait_recv_cost > M2N_NUM_HANG_CYCLES) {
+              printf("[kernel][dispatch][nvl_recv_x] wait than clock cycles: %ld\n", wait_recv_cost);
+              start_time = clock64();
+            }
+          }
+        }
       }
       num_recv_tokens = -num_recv_tokens - 1;
       recv_token_begin_idx =
@@ -982,11 +1005,22 @@ __global__ __launch_bounds__(
     EP_STATIC_ASSERT(kNumWarpsPerGroup > 1,
                      "Invalid number of warps per group");
     if (sub_warp_id == 0 && lane_id == 0) {
+      auto start_time = clock64();
+      auto wait_recv_cost = clock64();
       while (ld_acquire_sys_global(
                  reinterpret_cast<int*>(
                      reinterpret_cast<uint8_t*>(nvl_recv_buffer[nvl_rank]) +
                      NVL_BUFFER_X_BYTES) +
                  responsible_expert_idx) == 0) {
+        if (M2N_LL_HANG_DEBUG) {
+          if (thread_id == 0) {
+            wait_recv_cost = clock64() - start_time;
+            if (wait_recv_cost > M2N_NUM_HANG_CYCLES) {
+              printf("[kernel][combine][nvl_recv_buffer] wait than clock cycles: %ld\n", wait_recv_cost);
+              start_time = clock64();
+            }
+          }
+        }
       }
       // reset nvl_recv_buffer
       *(reinterpret_cast<int*>(
@@ -1110,8 +1144,19 @@ __global__ __launch_bounds__(
                      : 0;
       // all sms reduce done
       if (sub_deal_rdma_rank == 0 && thread_id == 0) {
+        auto start_time = clock64();
+        auto wait_recv_cost = clock64();
         while (ld_acquire_global(atomic_nvl_sender_multi_sms +
                                  deal_rdma_rank) != sms_per_rdma) {
+                                  if (M2N_LL_HANG_DEBUG) {
+          if (thread_id == 0) {
+            wait_recv_cost = clock64() - start_time;
+            if (wait_recv_cost > M2N_NUM_HANG_CYCLES) {
+              printf("[kernel][combine][atomic_nvl_sender_multi_sms] wait than clock cycles: %ld\n", wait_recv_cost);
+              start_time = clock64();
+            }
+          }
+        }
         }
         atomic_nvl_sender_multi_sms[deal_rdma_rank] = 0;
       }
@@ -1158,7 +1203,7 @@ __global__ __launch_bounds__(
         if (M2N_LL_HANG_DEBUG) {
           if (thread_id == 0) {
             wait_recv_cost = clock64() - start_time;
-            if (wait_recv_cost > 1000000000) {
+            if (wait_recv_cost > M2N_NUM_HANG_CYCLES) {
               printf("[kernel][combine][wait] wait than clock cycles: %ld\n", wait_recv_cost);
               start_time = clock64();
             }
@@ -1191,7 +1236,7 @@ __global__ __launch_bounds__(
         if (M2N_LL_HANG_DEBUG) {
           if (thread_id == 0) {
             wait_recv_cost = clock64() - start_time;
-            if (wait_recv_cost > 1000000000) {
+            if (wait_recv_cost > M2N_NUM_HANG_CYCLES) {
               printf("[kernel][combine][rdma_recv_flag] wait than clock cycles: %ld\n", wait_recv_cost);
               start_time = clock64();
             }
