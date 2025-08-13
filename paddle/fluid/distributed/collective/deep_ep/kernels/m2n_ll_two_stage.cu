@@ -1005,6 +1005,7 @@ __global__ __launch_bounds__(
     EP_STATIC_ASSERT(kNumWarpsPerGroup > 1,
                      "Invalid number of warps per group");
     if (rdma_rank >= e_start_rdma_rank && rdma_rank < e_start_rdma_rank + e_num_rdma_ranks && sub_warp_id == 0 && lane_id == 0) {
+    // if (sub_warp_id == 0 && lane_id == 0) {
       auto start_time = clock64();
       auto wait_recv_cost = clock64();
       while (ld_acquire_sys_global(
@@ -1350,7 +1351,7 @@ void combine(void* combined_x,
   const int num_rdma_ranks = num_ranks / NUM_MAX_NVL_PEERS;
 
   // Check workspace
-  auto atomic_clean_flag = reinterpret_cast<int*>(workspace + 32 * 1024 * 1024);
+  auto atomic_clean_flag = reinterpret_cast<int*>(workspace);
   auto atomic_nvl_sender_multi_sms = atomic_clean_flag + 1;
   EP_HOST_ASSERT((1 + num_rdma_ranks) * sizeof(int) <= NUM_WORKSPACE_BYTES);
   EP_HOST_ASSERT(num_topk <= kNumMaxTopk);

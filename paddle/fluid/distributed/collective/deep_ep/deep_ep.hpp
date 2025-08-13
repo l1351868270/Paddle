@@ -52,7 +52,9 @@ struct Buffer {
   // Low-latency mode buffer
   int low_latency_buffer_idx = 0;
   bool low_latency_mode = false;
-
+  int m2n_ll_dipatch_workspace_idx = 0;
+  int m2n_ll_combine_workspace_idx = 0;
+  
   // NVLink Buffer
   int64_t num_nvl_bytes;
   void* buffer_ptrs[NUM_MAX_NVL_PEERS] = {nullptr};

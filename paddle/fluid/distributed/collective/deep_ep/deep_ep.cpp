@@ -127,8 +127,8 @@ Buffer::Buffer(int rank,
   }
 
   // Create 32 MiB workspace
-  CUDA_CHECK(cudaMalloc(&workspace, NUM_WORKSPACE_BYTES));
-  CUDA_CHECK(cudaMemsetAsync(workspace, 0, NUM_WORKSPACE_BYTES, comm_stream));
+  CUDA_CHECK(cudaMalloc(&workspace, 6 * NUM_WORKSPACE_BYTES));
+  CUDA_CHECK(cudaMemsetAsync(workspace, 0, 6 * NUM_WORKSPACE_BYTES, comm_stream));
 
   // MoE counter
   CUDA_CHECK(
@@ -2288,6 +2288,8 @@ Buffer::m2n_low_latency_dispatch_two_stage(
   // fixed buffer, 0 for dispatch, 1 for combine
   auto buffer = layout.buffers[0];
   auto next_buffer = layout.buffers[1];
+  auto dispatch_workspace = reinterpret_cast<void*>(reinterpret_cast<uint8_t*>(workspace) + m2n_ll_dipatch_workspace_idx * NUM_WORKSPACE_BYTES);
+  m2n_ll_dipatch_workspace_idx = (m2n_ll_dipatch_workspace_idx + 1) % 3;
 
   // Wait previous tasks to be finished
   // NOTES: the hook mode will always use the default stream
@@ -2402,7 +2404,7 @@ Buffer::m2n_low_latency_dispatch_two_stage(
         e_start_rank,
         e_num_ranks,
         use_fp8,
-        workspace,
+        dispatch_workspace,
         launch_stream,
         phases);
   };
@@ -2511,6 +2513,8 @@ Buffer::m2n_low_latency_combine_two_stage(
   auto dispatch_buffer = layout.buffers[0];
   auto buffer = layout.buffers[1];
   auto next_buffer = layout.buffers[0];
+  auto combine_workspace = reinterpret_cast<void*>(reinterpret_cast<uint8_t*>(workspace) + (3 + m2n_ll_combine_workspace_idx) * NUM_WORKSPACE_BYTES);
+  m2n_ll_combine_workspace_idx = (m2n_ll_combine_workspace_idx + 1) % 3;
 
   // Wait previous tasks to be finished
   // NOTES: the hook mode will always use the default stream
@@ -2567,7 +2571,7 @@ Buffer::m2n_low_latency_combine_two_stage(
         a_num_ranks,
         e_start_rank,
         e_num_ranks,
-        workspace,
+        combine_workspace,
         launch_stream,
         phases,
         dispatch_use_fp8);
