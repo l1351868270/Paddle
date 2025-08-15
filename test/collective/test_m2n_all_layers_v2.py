@@ -19,7 +19,7 @@ from paddle.incubate.fp8.deep_gemm import (
 
 num_max_tokens = 512
 
-M2N_DEBUG = True
+M2N_DEBUG = False
 M2N_DEVICE_SYNC = False
 
 def per_token_cast_to_fp8(x: Tensor) -> tuple[Tensor, Tensor]:

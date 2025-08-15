@@ -276,25 +276,33 @@ __global__ __launch_bounds__(
                                ld_nc_global,
                                st_na_global);
           } else {
-            if constexpr (kNumQPs > 1) {
-              nvshmemi_ibgda_put_nbi_warp<true>(
-                  dst_ptr,
-                  src_ptr,
-                  num_bytes_per_msg,
-                  dst_rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank,
-                  qp_id,
-                  lane_id,
-                  0);
-            } else {
-              nvshmemi_ibgda_put_nbi_warp(
-                  dst_ptr,
-                  src_ptr,
-                  num_bytes_per_msg,
-                  dst_rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank,
-                  qp_id,
-                  lane_id,
-                  dst_cum_index);
-            }
+            const auto src_ptr_void = reinterpret_cast<void *>(src_ptr);
+            const auto dst_ptr_void = reinterpret_cast<void *>(dst_ptr);
+            nvshmemx_putmem_nbi_warp(
+              dst_ptr_void, 
+              src_ptr_void, 
+              num_bytes_per_msg, 
+              dst_rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank
+            );
+            // if constexpr (kNumQPs > 1) {
+            //   nvshmemi_ibgda_put_nbi_warp<true>(
+            //       dst_ptr,
+            //       src_ptr,
+            //       num_bytes_per_msg,
+            //       dst_rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank,
+            //       qp_id,
+            //       lane_id,
+            //       0);
+            // } else {
+            //   nvshmemi_ibgda_put_nbi_warp(
+            //       dst_ptr,
+            //       src_ptr,
+            //       num_bytes_per_msg,
+            //       dst_rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank,
+            //       qp_id,
+            //       lane_id,
+            //       dst_cum_index);
+            // }
           }
           __syncwarp();
           lane_id == 0
@@ -373,12 +381,18 @@ __global__ __launch_bounds__(
         0) {
         // debug info of dispatch wait
         if (M2N_LL_HANG_DEBUG) {
-          if (thread_id == 0) {
-            wait_recv_cost = clock64() - start_time;
-            if (wait_recv_cost > M2N_NUM_HANG_CYCLES) {
-              printf("[kernel][dispatch][wait] wait than clock cycles: %ld\n", wait_recv_cost);
+          wait_recv_cost = clock64() - start_time;
+          if (wait_recv_cost > M2N_NUM_HANG_CYCLES) {
+            if (thread_id == 0) {
+              printf("[kernel][dispatch][wait] wait than clock cycles: %ld, flags: ", wait_recv_cost);
+              for (int i = 0; i < a_num_ranks + e_num_ranks; i++) {
+                  auto lsl_flag_debug = ld_acquire_sys_global(rdma_recv_complete + src_rdma_rank * NUM_MAX_NVL_PEERS + i);
+                  printf("%d, ", lsl_flag_debug);
+              }
+              printf("\n");
               start_time = clock64();
             }
+            // break;
           }
         }
       }
@@ -1117,25 +1131,33 @@ __global__ __launch_bounds__(
                                ld_nc_global,
                                st_na_global);
           } else {
-            if constexpr (kNumQPs > 1) {
-              nvshmemi_ibgda_put_nbi_warp<true>(
-                  dst_ptr,
-                  src_ptr,
-                  combine_hidden_bytes,
-                  deal_rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank,
-                  qp_id,
-                  lane_id,
-                  0);
-            } else {
-              nvshmemi_ibgda_put_nbi_warp(
-                  dst_ptr,
-                  src_ptr,
-                  combine_hidden_bytes,
-                  deal_rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank,
-                  qp_id,
-                  lane_id,
-                  rdma_recv_token_idx);
-            }
+            const auto src_ptr_void = reinterpret_cast<void *>(src_ptr);
+            const auto dst_ptr_void = reinterpret_cast<void *>(dst_ptr);
+            nvshmemx_putmem_nbi_warp(
+              dst_ptr_void, 
+              src_ptr_void, 
+              combine_hidden_bytes, 
+              deal_rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank
+            );
+            // if constexpr (kNumQPs > 1) {
+            //   nvshmemi_ibgda_put_nbi_warp<true>(
+            //       dst_ptr,
+            //       src_ptr,
+            //       combine_hidden_bytes,
+            //       deal_rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank,
+            //       qp_id,
+            //       lane_id,
+            //       0);
+            // } else {
+            //   nvshmemi_ibgda_put_nbi_warp(
+            //       dst_ptr,
+            //       src_ptr,
+            //       combine_hidden_bytes,
+            //       deal_rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank,
+            //       qp_id,
+            //       lane_id,
+            //       rdma_recv_token_idx);
+            // }
           }
           __syncwarp();
         }

@@ -20,6 +20,8 @@ from paddle.incubate.fp8.deep_gemm import (
 num_max_tokens = 512
 
 M2N_DEBUG = False
+M2N_HANDLE_DEBUG = False
+M2N_DEVICE_SYNC = False
 
 
 def per_token_cast_to_fp8(x: Tensor) -> tuple[Tensor, Tensor]:
@@ -196,8 +198,9 @@ def test_main(
                     _, _, event, hook = a2e_send_result[a2e_mb_idx_pre]
                     # event.current_stream_wait()
                     hook() # .current_stream_wait()
-                    if M2N_DEBUG:
+                    if M2N_DEVICE_SYNC:
                         paddle.device.synchronize()
+                    if M2N_DEBUG:
                         print(f"{i} dispatch send wait attention {a2e_mb_idx_pre}_{a2e_layer_idx_pre} data end", flush=True)
                     
                 # attn 每一个micro batch均发送数据
@@ -209,8 +212,9 @@ def test_main(
                     num_experts,
                     use_fp8=use_fp8,
                 )
-                if M2N_DEBUG:
+                if M2N_DEVICE_SYNC:
                     paddle.device.synchronize()
+                if M2N_DEBUG:
                     print(f"{i} dispatch send attention {a2e_mb_idx}_{a2e_layer_idx} data begin", flush=True)
                 
                 # attn 最后一层不在接收数据
@@ -220,9 +224,9 @@ def test_main(
                     hook() #.current_stream_wait()
                     # x = e2a_x
                     # print(f"{i} combine recv wait moe {e2a_mb_idx}_{e2a_layer_idx} data end, x: {x}", flush=True)
-                    
-                    if M2N_DEBUG:
+                    if M2N_DEVICE_SYNC:
                         paddle.device.synchronize()
+                    if M2N_DEBUG:
                         # print(f"combine recv wait moe {e2a_mb_idx}_{e2a_layer_idx} data end, e2a_x: {e2a_x}", flush=True)
                         print(f"{i} combine recv wait moe {e2a_mb_idx}_{e2a_layer_idx} data end", flush=True)
                 
@@ -236,9 +240,12 @@ def test_main(
                         dispatch_use_fp8=use_fp8,
                         out=None,
                     )
-                    if M2N_DEBUG:
+                    if M2N_DEVICE_SYNC:
                         paddle.device.synchronize()
+                    if M2N_DEBUG:
                         print(f"{i} combine recv moe {e2a_mb_idx_next}_{e2a_layer_idx_next} data begin", flush=True)
+                    if M2N_HANDLE_DEBUG:
+                        print(f"{i} combine recv moe {e2a_mb_idx_next}_{e2a_layer_idx_next} data begin, handle: {handle}", flush=True)
                 a2e_send_result[a2e_mb_idx]
             # 最后一个micro batch循环不到，单独处理
             _, _, event, hook = a2e_send_result[a2e_mb_idx]
@@ -272,8 +279,9 @@ def test_main(
                 num_experts,
                 use_fp8=use_fp8,
             )
-            if M2N_DEBUG:
+            if M2N_DEVICE_SYNC:
                 paddle.device.synchronize()
+            if M2N_DEBUG:
                 print(f"{i} dispatch recv wait attention {0}_{moe_layer_start_index} data begin", flush=True)
             for idx in range (moe_layer_start_index * num_micro_batches, num_hidden_layers * num_micro_batches):
                 a2e_layer_idx = idx // num_micro_batches
@@ -292,8 +300,9 @@ def test_main(
                     event, hook = e2a_send_result[e2a_mb_idx_pre_pre]
                     # event.current_stream_wait()
                     hook()# .current_stream_wait()
-                    if M2N_DEBUG:
+                    if M2N_DEVICE_SYNC:
                         paddle.device.synchronize()
+                    if M2N_DEBUG:
                         print(f"{i} combine send wait moe {e2a_mb_idx_pre_pre}_{e2a_layer_idx_pre_pre} data end", flush=True)
                 
                 # moe 启动发送上一个micro batch的数据
@@ -313,10 +322,13 @@ def test_main(
                         dispatch_use_fp8=use_fp8,
                         out=None,
                     )
-                    if M2N_DEBUG:
+                    if M2N_DEVICE_SYNC:
                         paddle.device.synchronize()
+                    if M2N_DEBUG:
                         print(f"{i} combine send moe {e2a_mb_idx_pre}_{e2a_layer_idx_pre} data begin", flush=True)
-                
+                    if M2N_HANDLE_DEBUG:
+                        print(f"{i} combine send moe {e2a_mb_idx_pre}_{e2a_layer_idx_pre} data begin, handle: {handle}", flush=True)
+
                 # moe 每一个micro batch 都等待数据接收完
                 packed_recv_x, packed_recv_count, rdma_send_flags, _, event, hook = a2e_recv_result[a2e_mb_idx]
                 # event.current_stream_wait()
@@ -332,8 +344,9 @@ def test_main(
                 
                 # paddle.device.synchronize()
                 # print(f"dispatch recv wait attention {a2e_mb_idx}_{a2e_layer_idx} data end, packed_recv_x: {packed_recv_x}", flush=True)
-                if M2N_DEBUG:
+                if M2N_DEVICE_SYNC:
                     paddle.device.synchronize()
+                if M2N_DEBUG:
                     print(f"{i} dispatch recv wait attention {a2e_mb_idx}_{a2e_layer_idx} data end", flush=True)
                 # moe 最后一个micro batch不再启动接收下一个数据
                 if idx < num_hidden_layers * num_micro_batches - 1:
@@ -344,8 +357,9 @@ def test_main(
                         num_experts,
                         use_fp8=use_fp8,
                     )
-                    if M2N_DEBUG:
+                    if M2N_DEVICE_SYNC:
                         paddle.device.synchronize()
+                    if M2N_DEBUG:
                         print(f"{i} dispatch recv attention {a2e_mb_idx_next}_{a2e_layer_idx_next} data begin", flush=True)
                 # recv_count = packed_recv_count[0]
                 # num_valid_tokens = recv_count.item()
@@ -381,7 +395,7 @@ def test_loop():
         num_max_tokens, hidden, num_ranks, a_num_ranks, e_num_ranks, num_experts, num_topk
     )
     
-    use_fp8 = True
+    use_fp8 = False
     num_nvl_bytes = deep_ep.M2NBuffer.get_low_latency_nvl_size_hint_two_stage(
         num_max_tokens, hidden, num_ranks, a_num_ranks, e_num_ranks, num_experts, num_topk, use_fp8
     )
