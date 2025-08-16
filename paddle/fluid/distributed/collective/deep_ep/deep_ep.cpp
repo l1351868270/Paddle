@@ -2290,6 +2290,8 @@ Buffer::m2n_low_latency_dispatch_two_stage(
   auto next_buffer = layout.buffers[1];
   auto dispatch_workspace = reinterpret_cast<void*>(reinterpret_cast<uint8_t*>(workspace) + m2n_ll_dipatch_workspace_idx * NUM_WORKSPACE_BYTES);
   m2n_ll_dipatch_workspace_idx = (m2n_ll_dipatch_workspace_idx + 1) % 3;
+  auto dispatch_rdma_recv_complete = buffer.dispatch_rdma_recv_complete_buffer + m2n_ll_dispatch_recv_complete_idx * num_ranks;
+  m2n_ll_dispatch_recv_complete_idx = (m2n_ll_dispatch_recv_complete_idx + 1) % M2N_NUM_MAX_MICRO_BATCHES;
 
   // Wait previous tasks to be finished
   // NOTES: the hook mode will always use the default stream
@@ -2386,7 +2388,7 @@ Buffer::m2n_low_latency_dispatch_two_stage(
         rdma_send_flags.data_ptr<bool>(),
         buffer.dispatch_rdma_recv_data_buffer,
         buffer.dispatch_rdma_recv_count_buffer,
-        buffer.dispatch_rdma_recv_complete_buffer,
+        dispatch_rdma_recv_complete,
         buffer.dispatch_rdma_send_buffer,
         buffer_ptrs_gpu,
         x.data_ptr(),
@@ -2526,6 +2528,8 @@ Buffer::m2n_low_latency_combine_two_stage(
   auto next_buffer = layout.buffers[0];
   auto combine_workspace = reinterpret_cast<void*>(reinterpret_cast<uint8_t*>(workspace) + (3 + m2n_ll_combine_workspace_idx) * NUM_WORKSPACE_BYTES);
   m2n_ll_combine_workspace_idx = (m2n_ll_combine_workspace_idx + 1) % 3;
+  auto combine_rdma_recv_complete = buffer.combine_rdma_recv_complete_buffer + m2n_ll_combine_recv_complete_idx * num_ranks;
+  m2n_ll_combine_recv_complete_idx = (m2n_ll_combine_recv_complete_idx + 1) % M2N_NUM_MAX_MICRO_BATCHES;
 
   // Wait previous tasks to be finished
   // NOTES: the hook mode will always use the default stream
@@ -2561,7 +2565,7 @@ Buffer::m2n_low_latency_combine_two_stage(
         buffer.combine_rdma_recv_data_buffer,
         buffer.combine_rdma_recv_flag_buffer,
         buffer.combine_rdma_send_buffer,
-        buffer.combine_rdma_recv_complete_buffer,
+        combine_rdma_recv_complete,
         rdma_recv_x.data_ptr(),
         dispatch_rdma_recv_count.data_ptr<int>(),
         buffer_ptrs_gpu,

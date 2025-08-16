@@ -236,7 +236,8 @@ struct LowLatencyLayout {
     total_bytes += signaling_buffer_bytes * 2;
 
     // Symmetric complete signaling buffers
-    size_t recv_complete_buffer_bytes = 2 * num_ranks * sizeof(int);
+    size_t recv_complete_buffer_bytes = 2 * M2N_NUM_MAX_MICRO_BATCHES * num_ranks * sizeof(int);
+    total_bytes += recv_complete_buffer_bytes * 2;
 
     // Assign pointers
     // NOTES: we still leave some space for distinguishing dispatch/combine
@@ -330,7 +331,8 @@ struct LowLatencyTwoStageLayout {
     total_bytes += signaling_buffer_bytes * 2;
 
     // Symmetric complete signaling buffers
-    size_t recv_complete_buffer_bytes = 2 * num_ranks * sizeof(int);
+    size_t recv_complete_buffer_bytes = 2 * M2N_NUM_MAX_MICRO_BATCHES * num_ranks * sizeof(int);
+    total_bytes += recv_complete_buffer_bytes * 2;
 
     // Assign pointers
     for (int i = 0; i < 2; ++i) {
