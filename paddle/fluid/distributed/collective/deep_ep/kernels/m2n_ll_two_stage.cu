@@ -364,6 +364,32 @@ __global__ __launch_bounds__(
   if (rank >= a_start_rank && rank < a_start_rank + a_num_ranks) {
     int e_num_rdma_rank = e_num_ranks / NUM_MAX_NVL_PEERS;
     int e_start_rdma_rank = e_start_rank / NUM_MAX_NVL_PEERS;
+
+    // ==========
+    const int sms_per_rdma = num_sms / kNumRdmaRanks;
+    const int src_rdma_rank = sm_id / sms_per_rdma;
+    if (src_rdma_rank < kNumRdmaRanks) { 
+      const int sub_rdma_rank = sm_id % sms_per_rdma;
+      if (thread_id < kNumQPs) {
+        if (thread_id == 0) {
+          sub_rdma_rank == 0
+              ? packed_rdma_recv_count[src_rdma_rank] = -1
+              : 0;
+        }
+      }
+    }
+
+    // ========
+    if (responsible_expert_idx < kNumExperts) {
+      const auto src_rank = responsible_expert_idx / kNumLocalExperts;
+      const auto local_expert_idx = responsible_expert_idx % kNumLocalExperts;
+      const auto recv_range =
+        packed_recv_layout_range + local_expert_idx * kNumRanks;
+      recv_range[src_rank] =
+          pack2<int, int64_t>(0, 0);
+    }
+
+
     if (sm_id < e_num_rdma_rank && thread_id < NUM_MAX_NVL_PEERS) {
       int src_rdma_rank = sm_id + e_start_rdma_rank;
       auto lsl_flag_before = ld_acquire_sys_global(

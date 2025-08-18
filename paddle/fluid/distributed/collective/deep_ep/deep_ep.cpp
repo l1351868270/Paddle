@@ -2328,15 +2328,14 @@ Buffer::m2n_low_latency_dispatch_two_stage(
           phi::DataType::INT32,
           phi::GPUPlace(device_id)));
   auto packed_recv_layout_range = ConvertPaddleTensorToDetailTensor(
-      paddle::experimental::zeros({num_local_experts, num_ranks},
+      paddle::experimental::empty({num_local_experts, num_ranks},
                                   phi::DataType::INT64,
                                   phi::GPUPlace(device_id)));
   auto packed_recv_count =
       ConvertPaddleTensorToDetailTensor(paddle::experimental::empty(
           {num_local_experts}, phi::DataType::INT32, phi::GPUPlace(device_id)));
   auto packed_rdma_recv_count = ConvertPaddleTensorToDetailTensor(
-      paddle::experimental::full({num_ranks / NUM_MAX_NVL_PEERS},
-                                  -1,
+      paddle::experimental::empty({num_ranks / NUM_MAX_NVL_PEERS},
                                   phi::DataType::INT32,
                                   phi::GPUPlace(device_id)));
 
