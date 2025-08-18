@@ -2313,7 +2313,7 @@ Buffer::m2n_low_latency_dispatch_two_stage(
 
   // Allocate packed tensors
   auto packed_recv_x = ConvertPaddleTensorToDetailTensor(
-      paddle::experimental::zeros({num_local_experts,
+      paddle::experimental::empty({num_local_experts,
                                    num_ranks * num_max_dispatch_tokens_per_rank,
                                    hidden},
                                   return_x_dtype,
@@ -2323,7 +2323,7 @@ Buffer::m2n_low_latency_dispatch_two_stage(
                                   phi::DataType::BOOL,
                                   phi::GPUPlace(device_id)));
   auto packed_recv_src_info =
-      ConvertPaddleTensorToDetailTensor(paddle::experimental::zeros(
+      ConvertPaddleTensorToDetailTensor(paddle::experimental::empty(
           {num_local_experts, num_ranks * num_max_dispatch_tokens_per_rank},
           phi::DataType::INT32,
           phi::GPUPlace(device_id)));
@@ -2332,7 +2332,7 @@ Buffer::m2n_low_latency_dispatch_two_stage(
                                   phi::DataType::INT64,
                                   phi::GPUPlace(device_id)));
   auto packed_recv_count =
-      ConvertPaddleTensorToDetailTensor(paddle::experimental::zeros(
+      ConvertPaddleTensorToDetailTensor(paddle::experimental::empty(
           {num_local_experts}, phi::DataType::INT32, phi::GPUPlace(device_id)));
   auto packed_rdma_recv_count = ConvertPaddleTensorToDetailTensor(
       paddle::experimental::full({num_ranks / NUM_MAX_NVL_PEERS},
@@ -2348,7 +2348,7 @@ Buffer::m2n_low_latency_dispatch_two_stage(
       (use_fp8 ? (hidden + num_scales * sizeof(float))
                : (hidden * sizeof(nv_bfloat16)));
   auto packed_rdma_recv_x = ConvertPaddleTensorToDetailTensor(
-      paddle::experimental::zeros({num_ranks / NUM_MAX_NVL_PEERS,
+      paddle::experimental::empty({num_ranks / NUM_MAX_NVL_PEERS,
                                    num_max_dispatch_tokens_per_rank,
                                    num_bytes_per_msg},
                                    phi::DataType::UINT8,
@@ -2361,7 +2361,7 @@ Buffer::m2n_low_latency_dispatch_two_stage(
     EP_HOST_ASSERT((num_ranks * num_max_dispatch_tokens_per_rank) % 4 == 0 &&
                    "TMA requires the number of tokens to be multiple of 4");
     packed_recv_x_scales =
-        ConvertPaddleTensorToDetailTensor(paddle::experimental::zeros(
+        ConvertPaddleTensorToDetailTensor(paddle::experimental::empty(
             {num_local_experts,
              num_scales,
              num_ranks * num_max_dispatch_tokens_per_rank},
@@ -2553,7 +2553,7 @@ Buffer::m2n_low_latency_combine_two_stage(
     EP_HOST_ASSERT(out->scalar_type() == x.scalar_type());
     combined_x = out.value();
   } else {
-    combined_x = ConvertPaddleTensorToDetailTensor(paddle::experimental::zeros(
+    combined_x = ConvertPaddleTensorToDetailTensor(paddle::experimental::empty(
         {num_combined_tokens, hidden}, x.dtype(), x.place()));
   }
 
