@@ -2319,7 +2319,7 @@ Buffer::m2n_low_latency_dispatch_two_stage(
                                   return_x_dtype,
                                   x.place()));
   auto rdma_send_flags = ConvertPaddleTensorToDetailTensor(
-      paddle::experimental::zeros({num_tokens, num_ranks / NUM_MAX_NVL_PEERS},
+      paddle::experimental::empty({num_tokens, num_ranks / NUM_MAX_NVL_PEERS},
                                   phi::DataType::BOOL,
                                   phi::GPUPlace(device_id)));
   auto packed_recv_src_info =
