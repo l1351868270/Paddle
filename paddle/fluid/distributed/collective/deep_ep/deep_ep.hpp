@@ -56,6 +56,8 @@ struct Buffer {
   int m2n_ll_combine_workspace_idx = 0;
   int m2n_ll_dispatch_recv_complete_idx = 0;
   int m2n_ll_combine_recv_complete_idx = 0;
+  int m2n_low_latency_hyper_dispatch_buffer_idx = 0;
+  int m2n_low_latency_hyper_combine_buffer_idx = 0;
   
   // NVLink Buffer
   int64_t num_nvl_bytes;

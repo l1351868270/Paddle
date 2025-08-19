@@ -2288,6 +2288,30 @@ Buffer::m2n_low_latency_dispatch_two_stage(
   // fixed buffer, 0 for dispatch, 1 for combine
   auto buffer = layout.buffers[0];
   auto next_buffer = layout.buffers[1];
+  auto current_m2n_low_latency_hyper_dispatch_buffer_idx = m2n_low_latency_hyper_dispatch_buffer_idx;
+  if (m2n_low_latency_hyper_dispatch_buffer_idx == 1) {
+    // fixed buffer, 0 for dispatch, 1 for combine
+    buffer = layout.buffers_1[0];
+    next_buffer = layout.buffers_1[1];
+  } else if (m2n_low_latency_hyper_dispatch_buffer_idx == 2) {
+    // fixed buffer, 0 for dispatch, 1 for combine
+    buffer = layout.buffers_2[0];
+    next_buffer = layout.buffers_2[1];
+  } else if (m2n_low_latency_hyper_dispatch_buffer_idx == 3) {
+    // fixed buffer, 0 for dispatch, 1 for combine
+    buffer = layout.buffers_3[0];
+    next_buffer = layout.buffers_3[1];
+  } else if (m2n_low_latency_hyper_dispatch_buffer_idx == 4) {
+    // fixed buffer, 0 for dispatch, 1 for combine
+    buffer = layout.buffers_4[0];
+    next_buffer = layout.buffers_4[1];
+  } else if (m2n_low_latency_hyper_dispatch_buffer_idx == 5) {
+    // fixed buffer, 0 for dispatch, 1 for combine
+    buffer = layout.buffers_5[0];
+    next_buffer = layout.buffers_5[1];
+  }
+  m2n_low_latency_hyper_dispatch_buffer_idx = (m2n_low_latency_hyper_dispatch_buffer_idx + 1) % M2N_NUM_MAX_MICRO_BATCHES;
+
   auto dispatch_workspace = reinterpret_cast<void*>(reinterpret_cast<uint8_t*>(workspace) + m2n_ll_dipatch_workspace_idx * NUM_WORKSPACE_BYTES);
   m2n_ll_dipatch_workspace_idx = (m2n_ll_dipatch_workspace_idx + 1) % 3;
   auto dispatch_rdma_recv_complete = buffer.dispatch_rdma_recv_complete_buffer + m2n_ll_dispatch_recv_complete_idx * num_ranks;
@@ -2409,7 +2433,8 @@ Buffer::m2n_low_latency_dispatch_two_stage(
         use_fp8,
         dispatch_workspace,
         launch_stream,
-        phases);
+        phases,
+        current_m2n_low_latency_hyper_dispatch_buffer_idx);
   };
 
   // TODO(Zhenyu Li): supports async/return_recv_hook
@@ -2522,9 +2547,39 @@ Buffer::m2n_low_latency_combine_two_stage(
                                   num_topk);
   EP_HOST_ASSERT(layout.total_bytes <= num_rdma_bytes);
   // fixed buffer, 0 for dispatch, 1 for combine
+  auto current_m2n_low_latency_hyper_combine_buffer_idx = m2n_low_latency_hyper_combine_buffer_idx;
   auto dispatch_buffer = layout.buffers[0];
   auto buffer = layout.buffers[1];
   auto next_buffer = layout.buffers[0];
+
+  if (m2n_low_latency_hyper_combine_buffer_idx == 1) {
+    // fixed buffer, 0 for dispatch, 1 for combine
+    dispatch_buffer = layout.buffers_1[0];
+    buffer = layout.buffers_1[1];
+    next_buffer = layout.buffers_1[0];
+  } else if (m2n_low_latency_hyper_combine_buffer_idx == 2) {
+    // fixed buffer, 0 for dispatch, 1 for combine
+    dispatch_buffer = layout.buffers_2[0];
+    buffer = layout.buffers_2[1];
+    next_buffer = layout.buffers_2[0];
+  } else if (m2n_low_latency_hyper_combine_buffer_idx == 3) {
+    // fixed buffer, 0 for dispatch, 1 for combine
+    dispatch_buffer = layout.buffers_3[0];
+    buffer = layout.buffers_3[1];
+    next_buffer = layout.buffers_3[0];
+  } else if (m2n_low_latency_hyper_combine_buffer_idx == 4) {
+    // fixed buffer, 0 for dispatch, 1 for combine
+    dispatch_buffer = layout.buffers_4[0];
+    buffer = layout.buffers_4[1];
+    next_buffer = layout.buffers_4[0];
+  } else if (m2n_low_latency_hyper_combine_buffer_idx == 5) {
+    // fixed buffer, 0 for dispatch, 1 for combine
+    dispatch_buffer = layout.buffers_5[0];
+    buffer = layout.buffers_5[1];
+    next_buffer = layout.buffers_5[0];
+  }
+  m2n_low_latency_hyper_combine_buffer_idx = (m2n_low_latency_hyper_combine_buffer_idx + 1) % M2N_NUM_MAX_MICRO_BATCHES;
+
   auto combine_workspace = reinterpret_cast<void*>(reinterpret_cast<uint8_t*>(workspace) + (3 + m2n_ll_combine_workspace_idx) * NUM_WORKSPACE_BYTES);
   m2n_ll_combine_workspace_idx = (m2n_ll_combine_workspace_idx + 1) % 3;
   auto combine_rdma_recv_complete = buffer.combine_rdma_recv_complete_buffer + m2n_ll_combine_recv_complete_idx * num_ranks;
@@ -2590,7 +2645,8 @@ Buffer::m2n_low_latency_combine_two_stage(
         combine_workspace,
         launch_stream,
         phases,
-        dispatch_use_fp8);
+        dispatch_use_fp8,
+        current_m2n_low_latency_hyper_combine_buffer_idx);
   };
   // TODO(Zhenyu Li): supports async/return_recv_hook
   launcher(return_recv_hook

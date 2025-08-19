@@ -438,7 +438,8 @@ void dispatch(void* packed_recv_x,
               bool use_fp8,
               void* workspace,
               cudaStream_t stream,
-              int phases);
+              int phases,
+              int hyper_dispatch_buffer_idx);
 
 void combine(void* combined_x,
              void* rdma_recv_x,
@@ -470,7 +471,8 @@ void combine(void* combined_x,
              void* workspace,
              cudaStream_t stream,
              int phases,
-             bool dispatch_use_fp8);
+             bool dispatch_use_fp8,
+             int hyper_combine_buffer_idx);
 
 }  // namespace m2n_ll_two_stage
 
