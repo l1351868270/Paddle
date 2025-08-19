@@ -1331,10 +1331,10 @@ __global__ __launch_bounds__(
   }
     // TODO: 
   if (rank >= a_start_rank && rank < a_start_rank + a_num_ranks) {
-    int e_num_rdma_rank = e_num_ranks / NUM_MAX_NVL_PEERS;
-    int e_start_rdma_rank = e_start_rank / NUM_MAX_NVL_PEERS;
-    int a_start_rdma_rank = a_start_rank / NUM_MAX_NVL_PEERS;
-    if (sm_id < e_num_rdma_rank && thread_id < NUM_MAX_NVL_PEERS) {
+    // int e_num_rdma_ranks = e_num_ranks / NUM_MAX_NVL_PEERS;
+    // int e_start_rdma_rank = e_start_rank / NUM_MAX_NVL_PEERS;
+    // int a_start_rdma_rank = a_start_rank / NUM_MAX_NVL_PEERS;
+    if (sm_id < e_num_rdma_ranks && thread_id < NUM_MAX_NVL_PEERS) {
       int dst_rdma_rank = sm_id + e_start_rdma_rank;
       auto dst_ptr = reinterpret_cast<uint64_t>(
           rdma_recv_complete + num_ranks + rdma_rank * NUM_MAX_NVL_PEERS + nvl_rank);
