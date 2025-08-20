@@ -82,7 +82,7 @@ C = paddle.randn((96, 8192), dtype="bfloat16")
 A_fp8, B_fp8 = construct(A, B)
 
 def moe(x: Tensor, y: Tensor):
-    [paddle.matmul(x, y) for _ in range(9)]
+    # [paddle.matmul(x, y) for _ in range(9)]
     return paddle.matmul(x, y)
 
 def moe_fp8(x_fp8: Tensor, y_fp8: Tensor, out: Tensor):
@@ -276,8 +276,8 @@ def test_main(
             # moe 每一个micro batch 都等待数据接收完
             packed_recv_x, packed_recv_count, rdma_send_flags, handle, event, hook = a2e_recv_result[0]
             # event.current_stream_wait()
-            hook() # .current_stream_wait()
-
+            hook().current_stream_wait()
+            
             if M2N_DEVICE_SYNC:
                 paddle.device.synchronize()
             if M2N_DEBUG:
