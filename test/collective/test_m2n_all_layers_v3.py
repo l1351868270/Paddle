@@ -75,9 +75,9 @@ def per_token_cast_back(x_fp8: paddle.Tensor, x_scales: paddle.Tensor):
     return (x_fp32 * x_scales).view(x_fp8.shape).to("bfloat16")
 
 
-A = paddle.randn((96, 8192), dtype="bfloat16")
-B = paddle.randn((8192, 8192), dtype="bfloat16")
-C = paddle.randn((96, 8192), dtype="bfloat16")
+A = paddle.randn((96, 7168), dtype="bfloat16")
+B = paddle.randn((7168, 7168), dtype="bfloat16")
+C = paddle.randn((96, 7168), dtype="bfloat16")
 
 A_fp8, B_fp8 = construct(A, B)
 
@@ -129,7 +129,7 @@ def test_main(
     num_micro_batches = 3
     GB = num_tokens * 3
     MB = num_tokens
-    num_hidden_layers = 51
+    num_hidden_layers = 2
     moe_layer_start_index = 0
     num_benches = -1
 
@@ -145,15 +145,15 @@ def test_main(
     # 4. e2a 计算放到循环的结束位置, 第一micro batch循环不到，放到循环开始之前单独处理
     # 5. 只在通信index有效的位置进行通信操作
     if rank >= a_start_rank and rank < a_start_rank + a_num_ranks:
-        x = paddle.ones((num_tokens, hidden), dtype="bfloat16")
+        # x = 
+        xs = [paddle.ones((num_tokens, hidden), dtype="bfloat16") * 8 for _ in range(num_micro_batches)]
         weights = paddle.eye(intermediate_size, hidden, dtype="bfloat16")
 
         topk_idx = paddle.randint(
             0, num_experts, shape=[num_tokens, num_topk], dtype="int64"
         )
         print(f"rank: {rank}, num_local_experts: {num_local_experts}")
-        topk_weights = paddle.ones((num_tokens, num_topk), dtype="float32").abs_() / num_topk
-        print("x: ", x, flush=True)
+        topk_weights = paddle.ones((num_tokens, num_topk), dtype="float32").abs_() # / num_topk
 
         a2e_send_result = [None] * num_micro_batches
         e2a_recv_result = [None] * num_micro_batches
@@ -177,7 +177,7 @@ def test_main(
                 e2a_mb_idx_next = (idx - num_micro_batches + 2) % num_micro_batches # idx - 2
                 # attention
                 # x = attention(x, weights) # 96 28672
-                x = attention(x, weights)
+                xs[a2e_mb_idx] = attention(xs[a2e_mb_idx], weights)
 
                 if M2N_DEBUG:
                     print(f"====== {i} compute attention {a2e_mb_idx}_{a2e_layer_idx}", flush=True)
@@ -194,7 +194,7 @@ def test_main(
                     
                 # attn 每一个micro batch均发送数据
                 a2e_send_result[a2e_mb_idx] = buffer.a2e_isend_two_stage_v3(
-                    x,
+                    xs[a2e_mb_idx],
                     topk_idx,
                     topk_weights,
                     num_max_tokens,
@@ -234,14 +234,15 @@ def test_main(
                     hook() #.current_stream_wait()
                     # x = e2a_x
                     # print(f"{i} combine recv wait moe {e2a_mb_idx}_{e2a_layer_idx} data end, x: {x}", flush=True)
-                    x = e2a_x
+                    xs[e2a_mb_idx_next] = e2a_x
+
                     if M2N_DEVICE_SYNC: 
                         paddle.device.synchronize()
                     if M2N_DEBUG:
                         print(f"{i} combine recv wait moe {e2a_mb_idx_next}_{e2a_layer_idx_next} data end", flush=True)
                     if M2N_ACC_DEBUG:
                         # print(f"combine recv wait moe {e2a_mb_idx}_{e2a_layer_idx} data end, e2a_x: {e2a_x}", flush=True)
-                        print(f"{i} combine recv wait moe {e2a_mb_idx_next}_{e2a_layer_idx_next} data end, e2a_x: {x}", flush=True)
+                        print(f"{i} combine recv wait moe {e2a_mb_idx_next}_{e2a_layer_idx_next} data end, e2a_x: {xs[e2a_mb_idx_next]}", flush=True)
                             
             print(f"==================== {i}", flush=True)
             # time.sleep(1)
@@ -255,7 +256,6 @@ def test_main(
         while True:
             paddle.device.synchronize()
             dist.barrier()
-            a2e_recv_result_tmp = None
             i += 1
             if num_benches > 0 and i >= num_benches:
                 break
@@ -272,9 +272,8 @@ def test_main(
             if M2N_DEBUG:
                 print(f"0 dispatch recv attention {0}_{0} data begin", flush=True)
 
-
             # moe 每一个micro batch 都等待数据接收完
-            packed_recv_x, packed_recv_count, rdma_send_flags, handle, event, hook = a2e_recv_result[0]
+            _, _, _, _, _, hook = a2e_recv_result[0]
             # event.current_stream_wait()
             hook().current_stream_wait()
             
@@ -307,7 +306,7 @@ def test_main(
 
 
                     # moe 每一个micro batch 都等待数据接收完
-                    packed_recv_x, packed_recv_count, rdma_send_flags, handle, event, hook = a2e_recv_result[a2e_mb_idx_next]
+                    _, _, _, _, _, hook = a2e_recv_result[a2e_mb_idx_next]
                     # event.current_stream_wait()
                     hook() # .current_stream_wait()
                 
@@ -353,7 +352,7 @@ def test_main(
                         print(f"{i} combine send moe {e2a_mb_idx}_{e2a_layer_idx} data begin", flush=True)
 
                     if M2N_ACC_DEBUG:
-                        print(f"{i} combine send moe {e2a_mb_idx}_{e2a_layer_idx} data begin, simulated_gemm_x: {simulated_gemm_x}", flush=True)
+                        print(f"{i} combine send moe {e2a_mb_idx}_{e2a_layer_idx} data begin, simulated_gemm_x: {simulated_gemm_x}, handle: {handle}", flush=True)
                     
                     event, hook = e2a_send_result[e2a_mb_idx]
                     # event.current_stream_wait()
@@ -383,7 +382,7 @@ def test_loop():
     e_start_rank = a_start_rank + a_num_ranks
     e_num_ranks = num_ranks - a_num_ranks
 
-    num_tokens, hidden, num_topk, num_experts = 96, 8192, 8, 64
+    num_tokens, hidden, num_topk, num_experts = 96, 7168, 8, 64
 
     assert (
         num_tokens <= num_max_tokens

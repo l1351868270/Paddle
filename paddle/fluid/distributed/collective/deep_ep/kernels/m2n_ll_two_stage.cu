@@ -29,6 +29,7 @@ namespace deep_ep {
 namespace m2n_ll_two_stage {
 
 constexpr bool M2N_LL_DEBUG = false;
+constexpr bool M2N_LL_ACC_DEBUG = true;
 constexpr bool M2N_LL_HANG_DEBUG = true;
 constexpr int64_t M2N_NUM_HANG_CYCLES = 2000000000; // 345MHZ 5.8s;  
 
@@ -970,6 +971,23 @@ __global__ __launch_bounds__(
   if ((phases & LOW_LATENCY_SEND_PHASE) == 0)
     goto LOW_LATENCY_COMBINE_RECV;
 
+  if (M2N_LL_ACC_DEBUG) {
+    if (sm_id == 0 && thread_id == 0) {
+      if (responsible_expert_idx < num_experts) {
+        const auto dst_rank = responsible_expert_idx / num_local_experts;
+        const auto dst_rdma_rank = dst_rank / NUM_MAX_NVL_PEERS;
+        const auto dst_nvl_rank = dst_rank % NUM_MAX_NVL_PEERS;
+        auto tmp = reinterpret_cast<int*>(nvl_recv_buffer[dst_nvl_rank] + NVL_BUFFER_X_BYTES);
+        printf("nvl flag: ");
+        for (int i = 0; i < num_local_experts * num_ranks; i++) {
+          printf("%d, ", tmp[i]);
+        }
+        printf("\n");
+      }
+    }
+  }
+  
+  
   /* NVL Sender */
   if (responsible_expert_idx < num_experts) {
     const auto dst_rank = responsible_expert_idx / num_local_experts;
@@ -1024,7 +1042,7 @@ __global__ __launch_bounds__(
                  "r"(kNumWarpsPerGroup * 32));
     if (sub_warp_id == 1 && lane_id == 0) {
       auto dst_ptr = reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(
-                                                nvl_recv_buffer[dst_nvl_rank]) +
+                                            nvl_recv_buffer[dst_nvl_rank]) +
                                             NVL_BUFFER_X_BYTES) +
                      global_rdma_expert_idx * kNumRdmaRanks + dst_rdma_rank;
       st_release_sys_global(dst_ptr, 1);
