@@ -242,9 +242,6 @@ def test_main(
                         paddle.device.synchronize()
                     if M2N_DEBUG:
                         print(f"{i} combine recv wait moe {e2a_mb_idx_next}_{e2a_layer_idx_next} data end", flush=True)
-                    if M2N_ACC_DEBUG:
-                        # print(f"combine recv wait moe {e2a_mb_idx}_{e2a_layer_idx} data end, e2a_x: {e2a_x}", flush=True)
-                        print(f"{i} combine recv wait moe {e2a_mb_idx_next}_{e2a_layer_idx_next} data end", flush=True)
                             
             print(f"==================== {i}", flush=True)
             # time.sleep(1)
