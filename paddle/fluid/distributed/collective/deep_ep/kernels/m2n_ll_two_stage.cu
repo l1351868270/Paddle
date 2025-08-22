@@ -29,7 +29,7 @@ namespace deep_ep {
 namespace m2n_ll_two_stage {
 
 constexpr bool M2N_LL_DEBUG = false;
-constexpr bool M2N_LL_ACC_DEBUG = true;
+constexpr bool M2N_LL_ACC_DEBUG = false;
 constexpr bool M2N_LL_HANG_DEBUG = true;
 constexpr int64_t M2N_NUM_HANG_CYCLES = 2000000000; // 345MHZ 5.8s;  
 

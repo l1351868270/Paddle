@@ -127,8 +127,8 @@ Buffer::Buffer(int rank,
   }
 
   // Create 32 MiB workspace
-  CUDA_CHECK(cudaMalloc(&workspace, 6 * NUM_WORKSPACE_BYTES));
-  CUDA_CHECK(cudaMemsetAsync(workspace, 0, 6 * NUM_WORKSPACE_BYTES, comm_stream));
+  CUDA_CHECK(cudaMalloc(&workspace, 2 * M2N_NUM_WORKSPACE * NUM_WORKSPACE_BYTES));
+  CUDA_CHECK(cudaMemsetAsync(workspace, 0, 2 * M2N_NUM_WORKSPACE * NUM_WORKSPACE_BYTES, comm_stream));
 
   // MoE counter
   CUDA_CHECK(
@@ -2289,7 +2289,7 @@ Buffer::m2n_low_latency_dispatch_two_stage(
   auto buffer = layout.buffers[0];
   auto next_buffer = layout.buffers[1];
   auto dispatch_workspace = reinterpret_cast<void*>(reinterpret_cast<uint8_t*>(workspace) + m2n_ll_dipatch_workspace_idx * NUM_WORKSPACE_BYTES);
-  m2n_ll_dipatch_workspace_idx = (m2n_ll_dipatch_workspace_idx + 1) % 3;
+  m2n_ll_dipatch_workspace_idx = (m2n_ll_dipatch_workspace_idx + 1) % M2N_NUM_WORKSPACE;
   auto dispatch_rdma_recv_complete = buffer.dispatch_rdma_recv_complete_buffer + m2n_ll_dispatch_recv_complete_idx * num_ranks;
   m2n_ll_dispatch_recv_complete_idx = (m2n_ll_dispatch_recv_complete_idx + 1) % M2N_NUM_MAX_MICRO_BATCHES;
 
@@ -2529,8 +2529,8 @@ Buffer::m2n_low_latency_combine_two_stage(
   auto dispatch_buffer = layout.buffers[0];
   auto buffer = layout.buffers[1];
   auto next_buffer = layout.buffers[0];
-  auto combine_workspace = reinterpret_cast<void*>(reinterpret_cast<uint8_t*>(workspace) + (3 + m2n_ll_combine_workspace_idx) * NUM_WORKSPACE_BYTES);
-  m2n_ll_combine_workspace_idx = (m2n_ll_combine_workspace_idx + 1) % 3;
+  auto combine_workspace = reinterpret_cast<void*>(reinterpret_cast<uint8_t*>(workspace) + (M2N_NUM_WORKSPACE + m2n_ll_combine_workspace_idx) * NUM_WORKSPACE_BYTES);
+  m2n_ll_combine_workspace_idx = (m2n_ll_combine_workspace_idx + 1) % M2N_NUM_WORKSPACE;
   auto combine_rdma_recv_complete = buffer.combine_rdma_recv_complete_buffer + m2n_ll_combine_recv_complete_idx * num_ranks;
   m2n_ll_combine_recv_complete_idx = (m2n_ll_combine_recv_complete_idx + 1) % M2N_NUM_MAX_MICRO_BATCHES;
 
