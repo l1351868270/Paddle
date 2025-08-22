@@ -82,7 +82,7 @@ C = paddle.randn((96, 7168), dtype="bfloat16")
 A_fp8, B_fp8 = construct(A, B)
 
 def moe(x: Tensor, y: Tensor):
-    # [paddle.matmul(x, y) for _ in range(9)]
+    [paddle.matmul(x, y) for _ in range(9)]
     return paddle.matmul(x, y)
 
 def moe_fp8(x_fp8: Tensor, y_fp8: Tensor, out: Tensor):
@@ -129,7 +129,7 @@ def test_main(
     num_micro_batches = 3
     GB = num_tokens * 3
     MB = num_tokens
-    num_hidden_layers = 2
+    num_hidden_layers = 51
     moe_layer_start_index = 0
     num_benches = -1
 
@@ -146,7 +146,7 @@ def test_main(
     # 5. 只在通信index有效的位置进行通信操作
     if rank >= a_start_rank and rank < a_start_rank + a_num_ranks:
         # x = 
-        xs = [paddle.ones((num_tokens, hidden), dtype="bfloat16") * 8 for _ in range(num_micro_batches)]
+        xs = [paddle.ones((num_tokens, hidden), dtype="bfloat16") * (i + 2) for i in range(num_micro_batches)]
         weights = paddle.eye(intermediate_size, hidden, dtype="bfloat16")
 
         topk_idx = paddle.randint(
@@ -178,9 +178,11 @@ def test_main(
                 # attention
                 # x = attention(x, weights) # 96 28672
                 xs[a2e_mb_idx] = attention(xs[a2e_mb_idx], weights)
+                if M2N_ACC_DEBUG:
+                    print(f"====== {i} compute attention {a2e_mb_idx}_{a2e_layer_idx}: {xs[a2e_mb_idx]}", flush=True)
 
                 if M2N_DEBUG:
-                    print(f"====== {i} compute attention {a2e_mb_idx}_{a2e_layer_idx}", flush=True)
+                    print(f"====== {i} compute attention {a2e_mb_idx}_{a2e_layer_idx}: {xs[a2e_mb_idx]}", flush=True)
                 
                 # # attn 等待上一个micro batch数据接收完
                 # if a2e_layer_idx_pre >=  moe_layer_start_index:
@@ -242,7 +244,7 @@ def test_main(
                         print(f"{i} combine recv wait moe {e2a_mb_idx_next}_{e2a_layer_idx_next} data end", flush=True)
                     if M2N_ACC_DEBUG:
                         # print(f"combine recv wait moe {e2a_mb_idx}_{e2a_layer_idx} data end, e2a_x: {e2a_x}", flush=True)
-                        print(f"{i} combine recv wait moe {e2a_mb_idx_next}_{e2a_layer_idx_next} data end, e2a_x: {xs[e2a_mb_idx_next]}", flush=True)
+                        print(f"{i} combine recv wait moe {e2a_mb_idx_next}_{e2a_layer_idx_next} data end", flush=True)
                             
             print(f"==================== {i}", flush=True)
             # time.sleep(1)
@@ -352,7 +354,7 @@ def test_main(
                         print(f"{i} combine send moe {e2a_mb_idx}_{e2a_layer_idx} data begin", flush=True)
 
                     if M2N_ACC_DEBUG:
-                        print(f"{i} combine send moe {e2a_mb_idx}_{e2a_layer_idx} data begin, simulated_gemm_x: {simulated_gemm_x}, handle: {handle}", flush=True)
+                        print(f"{i} combine send moe {e2a_mb_idx}_{e2a_layer_idx} data begin, simulated_gemm_x: {simulated_gemm_x}", flush=True)
                     
                     event, hook = e2a_send_result[e2a_mb_idx]
                     # event.current_stream_wait()
