@@ -3,7 +3,7 @@ import random
 from functools import partial
 import time
 import numpy as np
-
+import math
 import paddle
 import paddle.distributed as dist
 from paddle.distributed import fleet
@@ -19,8 +19,8 @@ from paddle.incubate.fp8.deep_gemm import (
 
 num_max_tokens = 512
 
-M2N_DEBUG = False
-M2N_ACC_DEBUG = False
+M2N_DEBUG = True
+M2N_ACC_DEBUG = True
 M2N_DEVICE_SYNC = False
 
 def per_token_cast_to_fp8(x: Tensor) -> tuple[Tensor, Tensor]:
@@ -35,9 +35,7 @@ def per_token_cast_to_fp8(x: Tensor) -> tuple[Tensor, Tensor]:
     scaled_x_converted = paddle.view(
         scaled_x.astype(paddle.float8_e4m3fn), (m, n)
     )
-
     x_amax_scaled = paddle.view((x_amax / 448.0), (m, -1))
-
     result = (scaled_x_converted, x_amax_scaled)
     return result
 
@@ -75,9 +73,9 @@ def per_token_cast_back(x_fp8: paddle.Tensor, x_scales: paddle.Tensor):
     return (x_fp32 * x_scales).view(x_fp8.shape).to("bfloat16")
 
 
-A = paddle.randn((96, 7168), dtype="bfloat16")
-B = paddle.randn((7168, 7168), dtype="bfloat16")
-C = paddle.randn((96, 7168), dtype="bfloat16")
+A = paddle.randn((96, 8192), dtype="bfloat16")
+B = paddle.randn((8192, 8192), dtype="bfloat16")
+C = paddle.randn((96, 8192), dtype="bfloat16")
 
 A_fp8, B_fp8 = construct(A, B)
 
@@ -131,7 +129,7 @@ def test_main(
     MB = num_tokens
     num_hidden_layers = 51
     moe_layer_start_index = 0
-    num_benches = -1
+    num_benches = 2
 
     # x_fp8, y_fp8 = construct(x, y)
     # m, k = x.shape
@@ -146,14 +144,14 @@ def test_main(
     # 5. 只在通信index有效的位置进行通信操作
     if rank >= a_start_rank and rank < a_start_rank + a_num_ranks:
         # x = 
-        xs = [paddle.ones((num_tokens, hidden), dtype="bfloat16") * (i + 2) for i in range(num_micro_batches)]
+        xs = [paddle.ones((num_tokens, hidden), dtype="bfloat16") * 2 for i in range(num_micro_batches)]
         weights = paddle.eye(intermediate_size, hidden, dtype="bfloat16")
 
         topk_idx = paddle.randint(
             0, num_experts, shape=[num_tokens, num_topk], dtype="int64"
         )
         print(f"rank: {rank}, num_local_experts: {num_local_experts}")
-        topk_weights = paddle.ones((num_tokens, num_topk), dtype="float32").abs_() # / num_topk
+        topk_weights = paddle.ones((num_tokens, num_topk), dtype="float32").abs_() / num_topk * 2
 
         a2e_send_result = [None] * num_micro_batches
         e2a_recv_result = [None] * num_micro_batches
@@ -242,7 +240,16 @@ def test_main(
                         paddle.device.synchronize()
                     if M2N_DEBUG:
                         print(f"{i} combine recv wait moe {e2a_mb_idx_next}_{e2a_layer_idx_next} data end", flush=True)
-                            
+                    if M2N_ACC_DEBUG:
+                        print(f"index:{i} {e2a_mb_idx_next}_{e2a_layer_idx_next} e2a_recv x:{e2a_x}", flush=True)
+                    assert(paddle.all(e2a_x == e2a_x[0][0]).item())
+                    item = paddle.cast(e2a_x[0][0], 'int64').item()
+                    assert(item > 0)
+                    assert((item & (item - 1)) == 0)
+                    print("============================================= value correct ===============================================")
+                    # if num bigger than int32, then reset to 2
+                    if item > (1<< 31):
+                        xs[e2a_mb_idx_next] = paddle.ones((num_tokens, hidden), dtype="bfloat16") * 2
             print(f"==================== {i}", flush=True)
             # time.sleep(1)
         
@@ -350,8 +357,8 @@ def test_main(
                     if M2N_DEBUG:
                         print(f"{i} combine send moe {e2a_mb_idx}_{e2a_layer_idx} data begin", flush=True)
 
-                    if M2N_ACC_DEBUG:
-                        print(f"{i} combine send moe {e2a_mb_idx}_{e2a_layer_idx} data begin, simulated_gemm_x: {simulated_gemm_x}", flush=True)
+                    # if M2N_ACC_DEBUG:
+                    #     print(f"{i} combine send moe {e2a_mb_idx}_{e2a_layer_idx} data begin, simulated_gemm_x: {simulated_gemm_x}", flush=True)
                     
                     event, hook = e2a_send_result[e2a_mb_idx]
                     # event.current_stream_wait()
@@ -381,7 +388,7 @@ def test_loop():
     e_start_rank = a_start_rank + a_num_ranks
     e_num_ranks = num_ranks - a_num_ranks
 
-    num_tokens, hidden, num_topk, num_experts = 96, 7168, 8, 64
+    num_tokens, hidden, num_topk, num_experts = 96, 8192, 8, 64
 
     assert (
         num_tokens <= num_max_tokens
