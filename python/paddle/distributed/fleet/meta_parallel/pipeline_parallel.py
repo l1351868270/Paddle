@@ -135,9 +135,9 @@ class FakeMicroDataset:
             output = []
             for data in inputs:
                 if isinstance(data, list):
-                    assert (
-                        len(data) == self._acc_steps
-                    ), f"length of data should be {self._acc_steps}, but it is {len(data)}"
+                    assert len(data) == self._acc_steps, (
+                        f"length of data should be {self._acc_steps}, but it is {len(data)}"
+                    )
                     output.append(
                         data[micro_step].detach()
                         if data[micro_step] is not None
@@ -149,11 +149,28 @@ class FakeMicroDataset:
                 else:
                     output.append(None)
             return tuple(output)
-
+        elif isinstance(inputs, dict):
+            output_dict = {}
+            for key, data in inputs.items():
+                if isinstance(data, list):
+                    assert len(data) == self._acc_steps, (
+                        f"length of data should be {self._acc_steps}, but it is {len(data)}"
+                    )
+                    output_dict[key] = (
+                        data[micro_step].detach()
+                        if data[micro_step] is not None
+                        else None
+                    )
+                elif data is not None:
+                    self._check_data_valid(data)
+                    output_dict[key] = data[begin:end, :].detach()
+                else:
+                    output_dict[key] = None
+            return output_dict
         elif isinstance(inputs, list):
-            assert (
-                len(inputs) == self._acc_steps
-            ), f"length of data should be {self._acc_steps}, but it is {len(inputs)}"
+            assert len(inputs) == self._acc_steps, (
+                f"length of data should be {self._acc_steps}, but it is {len(inputs)}"
+            )
             return inputs[micro_step].detach()
         elif inputs is not None:
             self._check_data_valid(inputs)
@@ -206,9 +223,9 @@ class PipelineParallelMicroStepCallback:
         Raises:
             AssertionError: If the specified location is not a valid micro-step location.
         """
-        assert (
-            location in self.hooks
-        ), f"Invalid location '{location}'. Valid locations are 'forward_begin', 'forward_end', 'backward_begin', or 'backward_end'."
+        assert location in self.hooks, (
+            f"Invalid location '{location}'. Valid locations are 'forward_begin', 'forward_end', 'backward_begin', or 'backward_end'."
+        )
         self.hooks[location].append(hook)
 
     def on_location(
@@ -224,9 +241,9 @@ class PipelineParallelMicroStepCallback:
         Raises:
             AssertionError: If the specified location is not a valid micro-step location.
         """
-        assert (
-            location in self.hooks
-        ), f"Invalid location '{location}'. Valid locations are 'forward_begin', 'forward_end', 'backward_begin', or 'backward_end'."
+        assert location in self.hooks, (
+            f"Invalid location '{location}'. Valid locations are 'forward_begin', 'forward_end', 'backward_begin', or 'backward_end'."
+        )
         for hook in self.hooks[location]:
             hook(**kwargs)
 
@@ -263,6 +280,8 @@ class PipelineParallel(MetaParallelBase):
         self.use_moe_sharding_parallel = (
             self._hcg.get_moe_sharding_parallel_world_size() > 1
         )
+
+        self.use_dict_in_pp = True
 
         self.total_loss = None
 
@@ -381,9 +400,9 @@ class PipelineParallel(MetaParallelBase):
         if self._sharding_comm_overlap:
             assert self.use_sharding_parallel and self.num_stages > 1
 
-        assert not (
-            self._dp_comm_overlap and self._sharding_comm_overlap
-        ), "Cannot use dp pp overlap and sharding pp overlap at the same time."
+        assert not (self._dp_comm_overlap and self._sharding_comm_overlap), (
+            "Cannot use dp pp overlap and sharding pp overlap at the same time."
+        )
 
         self._chunk_2_comm_buffers = defaultdict(list)
         self._comm_overlap = (
@@ -512,17 +531,17 @@ class PipelineParallel(MetaParallelBase):
         ) * self.accumulate_steps
 
         if self.bubble_hooks:
-            assert (
-                self.bubble_hooks.current_id
-            ) == expected_bubble_step, f"bubble hooks status is not correct, current id is {self.bubble_hooks.current_id}, expected id is {expected_bubble_step}"
+            assert (self.bubble_hooks.current_id) == expected_bubble_step, (
+                f"bubble hooks status is not correct, current id is {self.bubble_hooks.current_id}, expected id is {expected_bubble_step}"
+            )
         if self.forward_hooks:
-            assert (
-                self.forward_hooks.current_id
-            ) == expected_forward_step, f"forward hooks status is not correct, current id is {self.forward_hooks.current_id}, expected id is {expected_forward_step}"
+            assert (self.forward_hooks.current_id) == expected_forward_step, (
+                f"forward hooks status is not correct, current id is {self.forward_hooks.current_id}, expected id is {expected_forward_step}"
+            )
         if self.backward_hooks:
-            assert (
-                self.backward_hooks.current_id
-            ) == expected_backward_step, f"backward hooks status is not correct, current id is {self.backward_hooks.current_id}, expected id is {expected_backward_step}"
+            assert (self.backward_hooks.current_id) == expected_backward_step, (
+                f"backward hooks status is not correct, current id is {self.backward_hooks.current_id}, expected id is {expected_backward_step}"
+            )
 
     def register_bubble_pipeline_parallel_hook(
         self, location: int, hook: Callable
@@ -723,9 +742,9 @@ class PipelineParallel(MetaParallelBase):
         if self.processed_steps < g_profile_pipeline_details_steps:
             get_sync_logger().info("start forward_backward_pipeline")
         if static_scheduler:
-            assert (
-                not self._profiling
-            ), "While _profiling, static scheduler is not available"
+            assert not self._profiling, (
+                "While _profiling, static scheduler is not available"
+            )
             if data is not None:
                 warnings.warn(
                     "Static scheduler run won't real run the model, but data has been provided"
@@ -757,27 +776,37 @@ class PipelineParallel(MetaParallelBase):
                 schedule += f"f{step_id};"
                 logger.info(f"forward step for micro step {step_id}")
                 continue
+
             input_tensor = self._p2p_helper.recv_forward(
                 self.is_pipeline_first_stage(),
                 batch_p2p_comm=self._use_batch_p2p_comm,
             )
 
+            input_tensor_dict, use_dict = tuple_to_dict_helper(input_tensor)
+
             self._record_stamp("F", step_id, '"B"', self._forward_color)
             output_tensor, _, _ = self._forward_step(
-                input_tensor, micro_dataset, step_id=step_id
+                input_tensor=input_tensor_dict if use_dict else input_tensor,
+                micro_dataset=micro_dataset,
+                step_id=step_id,
             )
+
+            # convert dict to tuple whose tensor element has a key attribution
+            output_tensor_tuple = dict_to_tuple_helper(output_tensor)
+
             self._record_stamp("F", step_id, '"E"', self._forward_color)
+            # fwd output dict -> send tuple
             self._p2p_helper.send_forward(
-                output_tensor,
-                self.is_pipeline_last_stage(),
+                output_tensor=output_tensor_tuple,
+                pp_last_stage=self.is_pipeline_last_stage(),
                 batch_p2p_comm=self._use_batch_p2p_comm,
             )
 
             input_buffers.append(input_tensor)
-            output_buffers.append(output_tensor)
+            output_buffers.append(output_tensor_tuple)
 
             if not self.is_pipeline_last_stage():
-                self._release_output(output_tensor)
+                self._release_output(output_tensor_tuple)
 
         if steady_steps > 0 and not static_scheduler:
             input_tensor = self._p2p_helper.recv_forward(
@@ -794,31 +823,38 @@ class PipelineParallel(MetaParallelBase):
                 continue
             last_iter = i == (steady_steps - 1)
 
+            input_tensor_dict, use_dict = tuple_to_dict_helper(input_tensor)
+
             self._record_stamp(
                 "F", startup_steps + i, '"B"', self._forward_color
             )
             output_tensor, _, _ = self._forward_step(
-                input_tensor, micro_dataset, step_id=startup_steps + i
+                input_tensor=input_tensor_dict if use_dict else input_tensor,
+                micro_dataset=micro_dataset,
+                step_id=startup_steps + i,
             )
             self._record_stamp(
                 "F", startup_steps + i, '"E"', self._forward_color
             )
 
+            output_tensor_tuple = dict_to_tuple_helper(output_tensor)
+
             output_tensor_grad = self._p2p_helper.send_forward_recv_backward(
-                output_tensor,
+                output_tensor_tuple,
                 self.is_pipeline_last_stage(),
                 batch_p2p_comm=self._use_batch_p2p_comm,
             )
 
             input_buffers.append(input_tensor)
-            output_buffers.append(output_tensor)
+            output_buffers.append(output_tensor_tuple)
 
             if not self.is_pipeline_last_stage():
-                self._release_output(output_tensor)
+                self._release_output(output_tensor_tuple)
 
-            input_tensor, output_tensor = input_buffers.pop(
-                0
-            ), output_buffers.pop(0)
+            input_tensor, output_tensor = (
+                input_buffers.pop(0),
+                output_buffers.pop(0),
+            )
 
             self._record_stamp("B", i, '"B"', self._backward_color)
             input_tensor_grad = self._backward_step(
@@ -877,9 +913,9 @@ class PipelineParallel(MetaParallelBase):
         self._flush_records()
 
         if self._comm_overlap:
-            assert (
-                len(self._chunk_2_comm_buffers) > 0
-            ), "comm buffers should be created"
+            assert len(self._chunk_2_comm_buffers) > 0, (
+                "comm buffers should be created"
+            )
             for _, buffers in self._chunk_2_comm_buffers.items():
                 for buffer in buffers:
                     buffer.scale_grads()
@@ -908,9 +944,9 @@ class PipelineParallel(MetaParallelBase):
 
     def register_sharding_comm_overlap_hook(self, optimizer):
         """for delayed hook register until we get optimizer"""
-        assert isinstance(
-            optimizer, HybridParallelOptimizer
-        ), 'optimizer should be HybridParallelOptimizer subclass.'
+        assert isinstance(optimizer, HybridParallelOptimizer), (
+            'optimizer should be HybridParallelOptimizer subclass.'
+        )
         self.optimizer = optimizer
         if self._sharding_comm_overlap and len(self._chunk_2_comm_buffers) == 0:
             self.register_allreduce_overlap_hook(
@@ -921,20 +957,20 @@ class PipelineParallel(MetaParallelBase):
         # reset the virtual pp rank for each run
         self.set_virtual_pipeline_rank(0)
 
-        assert isinstance(
-            optimizer, HybridParallelOptimizer
-        ), 'optimizer should be HybridParallelOptimizer subclass.'
+        assert isinstance(optimizer, HybridParallelOptimizer), (
+            'optimizer should be HybridParallelOptimizer subclass.'
+        )
 
-        assert (
-            framework._dygraph_tracer()._has_grad
-        ), 'Please enable the generation of gradients.'
+        assert framework._dygraph_tracer()._has_grad, (
+            'Please enable the generation of gradients.'
+        )
 
         if self.is_pipeline_first_stage(
             ignore_virtual=True
         ) or self.is_pipeline_last_stage(ignore_virtual=True):
-            assert (
-                data is not None
-            ), "For the first and the last stage, the data must be set."
+            assert data is not None, (
+                "For the first and the last stage, the data must be set."
+            )
         else:
             data = None
 
@@ -1085,9 +1121,9 @@ class PipelineParallel(MetaParallelBase):
         if self.is_pipeline_last_stage():
             # train calculate loss for train
             if self._compute_loss:
-                assert (
-                    self._layers._loss_fn[self.loss_fn_idx] is not None
-                ), "loss function should exist to compute loss"
+                assert self._layers._loss_fn[self.loss_fn_idx] is not None, (
+                    "loss function should exist to compute loss"
+                )
                 labels = next(micro_dataset)[1]
                 self._check_micro_batch_data_valid(labels)
                 for idx, loss_fn in enumerate(self._layers._loss_fn):
@@ -1104,9 +1140,9 @@ class PipelineParallel(MetaParallelBase):
                         loss_tensor = loss_fn_node.forward(output_tensor)
                     else:
                         loss_tensor = loss_fn(output_tensor, labels)
-                        assert isinstance(
-                            loss_tensor, paddle.Tensor
-                        ), "Currently, loss_fn should obtain Paddle.Tensor dtype"
+                        assert isinstance(loss_tensor, paddle.Tensor), (
+                            "Currently, loss_fn should obtain Paddle.Tensor dtype"
+                        )
 
                         with paddle.amp.auto_cast(enable=False):
                             if (
@@ -1216,7 +1252,9 @@ class PipelineParallel(MetaParallelBase):
                 if overlap_schedule_mode:
                     assert (
                         loss_fn_node is not None and schedule_chunk is not None
-                    ), "loss_fn_node and schedule_chunk should not be None in overlap_schedule_mode"
+                    ), (
+                        "loss_fn_node and schedule_chunk should not be None in overlap_schedule_mode"
+                    )
                     input_tensor_grad = loss_fn_node.backward(
                         scaler=self.scaler
                     )
@@ -1243,9 +1281,9 @@ class PipelineParallel(MetaParallelBase):
                     grad_tensors = [output_tensor_grad]
 
                 if overlap_schedule_mode:
-                    assert (
-                        schedule_chunk is not None
-                    ), "schedule_chunk should not be None in overlap_schedule_mode"
+                    assert schedule_chunk is not None, (
+                        "schedule_chunk should not be None in overlap_schedule_mode"
+                    )
                     input_tensor_grad = schedule_chunk.backward(grad_tensors)
                 else:
                     paddle.autograd.backward(
@@ -1287,6 +1325,9 @@ class PipelineParallel(MetaParallelBase):
         if isinstance(micro_batch_data, (tuple, list)):
             for data in micro_batch_data:
                 self._check_micro_batch_data_valid(data)
+        elif isinstance(micro_batch_data, dict):
+            for value in micro_batch_data.values():
+                self._check_micro_batch_data_valid(value)
         elif micro_batch_data is not None:
             assert isinstance(micro_batch_data, paddle.Tensor)
 
@@ -1294,9 +1335,9 @@ class PipelineParallel(MetaParallelBase):
         # Since the last backward run in interleave will set the virtual rank to 0,
         # here we need to check last stage ignoring virtual stage.
         if self.is_pipeline_last_stage(ignore_virtual=True):
-            assert (
-                self.total_loss is not None
-            ), "train_batch() in last stage should obtain valid loss"
+            assert self.total_loss is not None, (
+                "train_batch() in last stage should obtain valid loss"
+            )
             losses = []
             for idx in range(len(self._layers._loss_fn)):
                 self.total_loss[idx] = paddle.to_tensor(self.total_loss[idx])
@@ -1456,9 +1497,9 @@ class PipelineParallelWithInterleave(PipelineParallel):
         )
 
         if self.overlap_schedule_mode:
-            assert (
-                not self._profiling
-            ), "Profiling is not compatible with overlap_schedule_mode."
+            assert not self._profiling, (
+                "Profiling is not compatible with overlap_schedule_mode."
+            )
         logger.info(f"Using {self._get_scheduler_name()}")
 
         self._record_format = (
@@ -1493,9 +1534,9 @@ class PipelineParallelWithInterleave(PipelineParallel):
             "pp_configs"
         ].best_unbalanced_scheduler
         if self._best_unbalanced_scheduler:
-            assert (
-                not self._comm_overlap
-            ), "pp best unbalaced scheduler can not run together with dp/sharding overlap"
+            assert not self._comm_overlap, (
+                "pp best unbalaced scheduler can not run together with dp/sharding overlap"
+            )
 
         self._enable_offload_queue = self._strategy.hybrid_configs[
             "pp_configs"
@@ -1513,17 +1554,17 @@ class PipelineParallelWithInterleave(PipelineParallel):
         self.bubble_hooks.set_hooks_capacity(2 * self.num_stages - 2)
 
     def _check_sanity(self):
-        assert (
-            framework.in_dynamic_mode()
-        ), "virtual pipeline stage with interleave only support eager dygraph mode"
+        assert framework.in_dynamic_mode(), (
+            "virtual pipeline stage with interleave only support eager dygraph mode"
+        )
 
-        assert (
-            self.num_stages > 2
-        ), "virtual pipeline must run under pp degree > 2"
+        assert self.num_stages > 2, (
+            "virtual pipeline must run under pp degree > 2"
+        )
 
-        assert (
-            self.accumulate_steps >= 2 * self.num_stages
-        ), f"accumulate_steps({self.accumulate_steps}) should be greater than or equal to 2 * num_stages({self.num_stages}) for pipeline with interleave"
+        assert self.accumulate_steps >= 2 * self.num_stages, (
+            f"accumulate_steps({self.accumulate_steps}) should be greater than or equal to 2 * num_stages({self.num_stages}) for pipeline with interleave"
+        )
 
     def _reset_counter(self):
         for i in range(self.num_model_chunks):
@@ -1678,25 +1719,36 @@ class PipelineParallelWithInterleave(PipelineParallel):
             self.output_tensors[virtual_pp_rank].pop()
 
     def _forward_step_helper(
-        self, micro_dataset, micro_step, overlap_schedule_mode=False
+        self,
+        micro_dataset,
+        micro_step,
+        overlap_schedule_mode=False,
+        check_is_last_chunk=False,
     ):
         virtual_pp_rank = self._get_virtual_pp_rank(micro_step, forward=True)
+        if check_is_last_chunk and virtual_pp_rank == self.num_model_chunks - 1:
+            os.environ["FLAGS_last_vpp_chunk_forward"] = "1"
+
         self.set_virtual_pipeline_rank(virtual_pp_rank)
 
         input_tensor = self._get_forward_input(virtual_pp_rank)
 
+        input_tensor_dict, use_dict = tuple_to_dict_helper(input_tensor)
+
         output_tensor, schedule_chunk, loss_fn_node = self._forward_step(
-            input_tensor,
+            input_tensor_dict if use_dict else input_tensor,
             micro_dataset,
-            virtual_pp_rank,
+            virtual_pp_rank,  # chunk_id
             step_id=micro_step,
             overlap_schedule_mode=overlap_schedule_mode,
         )
 
+        output_tensor_tuple = dict_to_tuple_helper(output_tensor)
+
         self._store_forward_outputs(
-            virtual_pp_rank, output_tensor, schedule_chunk, loss_fn_node
+            virtual_pp_rank, output_tensor_tuple, schedule_chunk, loss_fn_node
         )
-        return output_tensor
+        return output_tensor_tuple
 
     def _overlap_comm_grads(self):
         if self._comm_overlap:
@@ -1737,9 +1789,9 @@ class PipelineParallelWithInterleave(PipelineParallel):
         assert hasattr(self, 'output_tensors')
         assert hasattr(self, 'output_tensor_grads')
 
-        assert (
-            len(self.output_tensor_grads[virtual_pp_rank]) > 0
-        ), f"output_tensor_grads is empty for virtual_pp_rank {virtual_pp_rank}"
+        assert len(self.output_tensor_grads[virtual_pp_rank]) > 0, (
+            f"output_tensor_grads is empty for virtual_pp_rank {virtual_pp_rank}"
+        )
 
         assert len(self.input_tensors[virtual_pp_rank]) > 0
         assert len(self.output_tensors[virtual_pp_rank]) > 0
@@ -1970,17 +2022,17 @@ class PipelineParallelWithInterleave(PipelineParallel):
         # this strategy is inspired by:
         # https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/schedules.py
         if not compute_loss:
-            assert (
-                not forward_only
-            ), "compute_loss can only be set to False when forward_only is set to True"
+            assert not forward_only, (
+                "compute_loss can only be set to False when forward_only is set to True"
+            )
 
         if static_scheduler:
-            assert (
-                not forward_only
-            ), "static_scheduler only for training not for eval"
-            assert (
-                not self._profiling
-            ), "While _profiling, static scheduler is not available"
+            assert not forward_only, (
+                "static_scheduler only for training not for eval"
+            )
+            assert not self._profiling, (
+                "While _profiling, static scheduler is not available"
+            )
             if data is not None:
                 warnings.warn(
                     "Static scheduler run won't real run the model, but data has been provided"
@@ -1990,9 +2042,9 @@ class PipelineParallelWithInterleave(PipelineParallel):
             )
             schedule = ""
         # NOTE(shenliang03): Due to ring_exchange for pipeline with interleave, cache should be enabled
-        assert (
-            self._using_cache
-        ), "cache should be enabled for pipeline with interleave"
+        assert self._using_cache, (
+            "cache should be enabled for pipeline with interleave"
+        )
 
         self.overlap_schedule_mode = (
             hasattr(type(self._layers), "overlapped_forward_backward")
@@ -2050,9 +2102,9 @@ class PipelineParallelWithInterleave(PipelineParallel):
 
         def _last_stage_recv_pp_rank(micro_step):
             if micro_step >= first_chunk_acc:
-                assert (
-                    len(last_stage_recv_queue) != 0
-                ), "last_stage_recv_queue can't be empty"
+                assert len(last_stage_recv_queue) != 0, (
+                    "last_stage_recv_queue can't be empty"
+                )
                 virtual_pp_stage = (last_stage_recv_queue.popleft())[1]
                 return virtual_pp_stage - 1
             else:
@@ -2840,13 +2892,13 @@ class PipelineParallelWithInterleaveFthenB(PipelineParallelWithInterleave):
         # self.bubble_hooks.set_hooks_capacity(2 * self.num_stages - 2)
 
     def _check_sanity(self):
-        assert (
-            framework.in_dynamic_mode()
-        ), "virtual pipeline stage with interleave only support eager dygraph mode"
+        assert framework.in_dynamic_mode(), (
+            "virtual pipeline stage with interleave only support eager dygraph mode"
+        )
 
-        assert (
-            self.num_stages > 2
-        ), "virtual pipeline must run under pp degree > 2"
+        assert self.num_stages > 2, (
+            "virtual pipeline must run under pp degree > 2"
+        )
 
     def _get_virtual_pp_rank(self, micro_step, forward):
         virtual_pp_stage = micro_step % (
@@ -2907,14 +2959,14 @@ class PipelineParallelWithInterleaveFthenB(PipelineParallelWithInterleave):
         if self.processed_steps < g_profile_pipeline_details_steps:
             get_sync_logger().info("start forward_backward_pipeline")
         if not compute_loss:
-            assert (
-                not forward_only
-            ), "compute_loss can only be set to False when forward_only is set to True"
+            assert not forward_only, (
+                "compute_loss can only be set to False when forward_only is set to True"
+            )
 
         # NOTE(shenliang03): Due to ring_exchange for pipeline with interleave, cache should be enabled
-        assert (
-            self._using_cache
-        ), "cache should be enabled for pipeline with interleave"
+        assert self._using_cache, (
+            "cache should be enabled for pipeline with interleave"
+        )
 
         # init some attributes for this batch run
         self.scaler = scaler
@@ -2926,7 +2978,9 @@ class PipelineParallelWithInterleaveFthenB(PipelineParallelWithInterleave):
         assert (
             self.accumulate_steps == self.num_stages
             or self.accumulate_steps % self.num_stages != 0
-        ), f"accumulate_steps({self.accumulate_steps}) and num_stages({self.num_stages}) should be a multiple or accumulate_steps % num_stages == 0"
+        ), (
+            f"accumulate_steps({self.accumulate_steps}) and num_stages({self.num_stages}) should be a multiple or accumulate_steps % num_stages == 0"
+        )
 
         self._backward_step_count = 0
         skip_steps = self.accumulate_steps - self.num_stages
@@ -2946,7 +3000,6 @@ class PipelineParallelWithInterleaveFthenB(PipelineParallelWithInterleave):
             )
         )
 
-        # run startup steps
         for micro_step in range(num_steps):
             output_tensor = self._forward_step_helper(micro_dataset, micro_step)
             # determine whether recv forward tensor or not
@@ -2987,9 +3040,9 @@ class PipelineParallelWithInterleaveFthenB(PipelineParallelWithInterleave):
 
             self._release_output(output_tensor)
 
-        assert (
-            send_recv_buffer_queue.empty()
-        ), "send_recv buffer should be empty"
+        assert send_recv_buffer_queue.empty(), (
+            "send_recv buffer should be empty"
+        )
 
         # remaining backward steps
         if not forward_only:
@@ -3038,9 +3091,9 @@ class PipelineParallelWithInterleaveFthenB(PipelineParallelWithInterleave):
                     )
                 )
 
-            assert (
-                send_recv_buffer_queue.empty()
-            ), "send_recv buffer should be empty"
+            assert send_recv_buffer_queue.empty(), (
+                "send_recv buffer should be empty"
+            )
 
             self._sync_overlap_grads()
 
@@ -3121,10 +3174,8 @@ class VPPFhenBInBalancedMemory(PipelineParallelWithInterleaveFthenB):
         return "VPPFhenBInBalancedMemory"
 
     def _init_user_bubble_hooks(self):
-        # (TODO:gexiao) support bubble hooks if needed
-        self.bubble_hooks = None
-        # self.bubble_hooks = PipelineHook()
-        # self.bubble_hooks.set_hooks_capacity(2 * self.num_stages - 2)
+        self.bubble_hooks = PipelineHook()
+        self.bubble_hooks.set_hooks_capacity(2 * self.num_stages - 2)
 
     def forward_backward_pipeline(
         self,
@@ -3136,12 +3187,12 @@ class VPPFhenBInBalancedMemory(PipelineParallelWithInterleaveFthenB):
     ):
         self._reset_user_hooks_status()
         if not compute_loss:
-            assert (
-                not forward_only
-            ), "compute_loss can only be set to False when forward_only is set to True"
-        assert (
-            self._using_cache
-        ), "cache should be enabled for pipeline with interleave"
+            assert not forward_only, (
+                "compute_loss can only be set to False when forward_only is set to True"
+            )
+        assert self._using_cache, (
+            "cache should be enabled for pipeline with interleave"
+        )
         self.user_hooks_enabled = not forward_only
         if forward_only:
             return super().forward_backward_pipeline(
@@ -3186,6 +3237,11 @@ class VPPFhenBInBalancedMemory(PipelineParallelWithInterleaveFthenB):
             self.num_stages - self.stage_id - 1
         )
         cooldown_steps = startup_steps
+
+        # Bubbles before startup_steps
+        for _ in range(self.stage_id):
+            if self.user_hooks_enabled:
+                self.bubble_hooks.run_hook()
 
         self.set_virtual_pipeline_rank(0)
         self.input_tensors[0].append(
@@ -3240,15 +3296,23 @@ class VPPFhenBInBalancedMemory(PipelineParallelWithInterleaveFthenB):
 
         input_tensor_grad = None
         for micro_step in range(steady_1f1b_steps):
+            first_iter = micro_step == 0
             last_iter = micro_step == (steady_1f1b_steps - 1)
             forward_micro_step_id = micro_step + startup_steps
             backward_micro_step_id = micro_step
 
             self._record_stamp("F", forward_micro_step_id, '"B"', forward=True)
             output_tensor = self._forward_step_helper(
-                micro_dataset, forward_micro_step_id
+                micro_dataset,
+                forward_micro_step_id,
+                check_is_last_chunk=True,
             )
             self._record_stamp("F", forward_micro_step_id, '"E"', forward=True)
+
+            if first_iter:
+                for _ in range(self.num_stages - self.stage_id - 1):
+                    if self.user_hooks_enabled:
+                        self.bubble_hooks.run_hook()
 
             # NOTE: `send_forward_recv_backward` is intentionally unused to
             # prevent hanging bugs in dynamic shape mode.
@@ -3303,10 +3367,14 @@ class VPPFhenBInBalancedMemory(PipelineParallelWithInterleaveFthenB):
                 self.input_tensors[next_forward_virtual_pp_rank].append(
                     input_tensor
                 )
+            else:
+                for _ in range(self.num_stages - self.stage_id - 1):
+                    if self.user_hooks_enabled:
+                        self.bubble_hooks.run_hook()
 
-        assert (
-            forward_send_recv_buffer_queue.qsize() == 0
-        ), forward_send_recv_buffer_queue.qsize()
+        assert forward_send_recv_buffer_queue.qsize() == 0, (
+            forward_send_recv_buffer_queue.qsize()
+        )
 
         next_backward_virtual_pp_rank = self._get_virtual_pp_rank(
             steady_1f1b_steps, forward=False
@@ -3364,9 +3432,14 @@ class VPPFhenBInBalancedMemory(PipelineParallelWithInterleaveFthenB):
                 )
             )
 
-        assert (
-            backward_send_recv_buffer_queue.empty()
-        ), "send_recv buffer should be empty"
+        assert backward_send_recv_buffer_queue.empty(), (
+            "send_recv buffer should be empty"
+        )
+
+        # Bubbles after cooldown
+        for _ in range(self.stage_id):
+            if self.user_hooks_enabled:
+                self.bubble_hooks.run_hook()
 
         # reset dynamic meta counter
         if self._dynamic_shape:
@@ -3406,3 +3479,55 @@ class VPPFhenBInBalancedMemory(PipelineParallelWithInterleaveFthenB):
         self.processed_steps += 1
         self._check_user_hooks_status_at_step_end()
         return train_loss
+
+
+def tuple_to_dict_helper(input_tensor):
+    # recv tuple -> fwd input dict
+    use_dict = False
+    if isinstance(input_tensor, tuple):
+        use_dict = hasattr(input_tensor[0], "key")
+    else:  # single tensor
+        use_dict = hasattr(input_tensor, "key")
+    if use_dict:
+        input_tensor = convert_tensor_tuple_to_dict(input_tensor)
+    return input_tensor, use_dict
+
+
+def dict_to_tuple_helper(output_tensor):
+    if isinstance(output_tensor, dict):
+        output_tensor_tuple = convert_tensor_dict_to_tuple(
+            output_tensor_dict=output_tensor
+        )
+    else:  # single tensor or tensor tuple
+        output_tensor_tuple = output_tensor
+    return output_tensor_tuple
+
+
+def convert_tensor_dict_to_tuple(output_tensor_dict):
+    output_tensor = []
+    for key, tensor in output_tensor_dict.items():
+        if isinstance(tensor, (list, tuple)):
+            for idx, t in enumerate(tensor):
+                t.key = key + " " + str(idx)
+                output_tensor.append(t)
+        else:  # single tensor
+            tensor.key = key
+            output_tensor.append(tensor)
+
+    return tuple(output_tensor)
+
+
+def convert_tensor_tuple_to_dict(input_tensor_tuple):
+    input_tensor_dict = {}
+    for tensor in input_tensor_tuple:
+        key = tensor.key
+        if " " in key:
+            real_key, _ = key.split(" ")
+            if real_key in input_tensor_dict.keys():
+                input_tensor_dict[real_key].append(tensor)
+            else:
+                input_tensor_dict[real_key] = [tensor]
+        else:
+            input_tensor_dict[key] = tensor
+        delattr(tensor, "key")
+    return input_tensor_dict
