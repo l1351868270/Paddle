@@ -2413,39 +2413,15 @@ Buffer::m2n_low_latency_dispatch_two_stage(
             ? LOW_LATENCY_SEND_PHASE
             : (LOW_LATENCY_SEND_PHASE | LOW_LATENCY_RECV_PHASE));
 
-  // Wait streams
-  // std::optional<EventHandle> event;
-  // if (async) {
-  //   // NOTES: we must ensure the all tensors will not be deallocated before the
-  //   // stream-wait happens, so in Python API, we must wrap all tensors into the
-  //   // event handle.
-  //   event = EventHandle(launch_stream);
-  // } else if (!return_recv_hook) {
-  //   stream_wait(compute_stream, launch_stream);
-  // }
-
   std::optional<EventHandle> event;
   if (async) {
-    // NOTES: we must ensure the all tensors will not be deallocated before the
-    // stream-wait happens, so in Python API, we must wrap all tensors into the
-    // event handle.
     event = EventHandle(launch_stream);
   }
-  // // stream_wait(launch_stream, compute_stream);
-  // if (rank >= a_start_rank && rank < a_start_rank + a_num_ranks) {
-  //   stream_wait(compute_stream, launch_stream);
-  // }
 
   // Receiver callback
   std::optional<std::function<EventHandle()>> recv_hook = std::nullopt;
   if (return_recv_hook) recv_hook = [=]() {
-    // stream_wait(launch_stream, compute_stream); 
     launcher(LOW_LATENCY_RECV_PHASE); 
-    // stream_wait(compute_stream, launch_stream);
-
-    // if (rank >= e_start_rank && rank < e_start_rank + e_num_ranks) {
-    //   stream_wait(compute_stream, launch_stream);
-    // }
     return EventHandle(launch_stream);}; 
 
   return {packed_recv_x,
@@ -2526,13 +2502,6 @@ Buffer::m2n_low_latency_combine_two_stage(
   auto combine_rdma_recv_complete = buffer.combine_rdma_recv_complete_buffer + m2n_ll_combine_recv_complete_idx * num_ranks;
   m2n_ll_combine_recv_complete_idx = (m2n_ll_combine_recv_complete_idx + 1) % M2N_NUM_MAX_MICRO_BATCHES;
 
-  // Wait previous tasks to be finished
-  // NOTES: the hook mode will always use the default stream
-  // auto compute_stream = calc_ctx->stream();
-  // auto launch_stream = return_recv_hook ? compute_stream : comm_stream;
-  // EP_HOST_ASSERT(!(async && return_recv_hook));
-  // if (!return_recv_hook) stream_wait(launch_stream, compute_stream);
-
   auto compute_stream = calc_ctx->stream();
   auto launch_stream = comm_stream;
   if (rank >= e_start_rank && rank < e_start_rank + e_num_ranks) {
@@ -2592,43 +2561,17 @@ Buffer::m2n_low_latency_combine_two_stage(
         phases,
         dispatch_use_fp8);
   };
-  // TODO(Zhenyu Li): supports async/return_recv_hook
   launcher(return_recv_hook
               ? LOW_LATENCY_SEND_PHASE
               : (LOW_LATENCY_SEND_PHASE | LOW_LATENCY_RECV_PHASE));
 
-  // Wait streams
-  // std::optional<EventHandle> event;
-  // if (async) {
-  //   // NOTES: we must ensure the all tensors will not be deallocated before the
-  //   // stream-wait happens, so in Python API, we must wrap all tensors into the
-  //   // event handle.
-  //   event = EventHandle(launch_stream);
-  // } else if (!return_recv_hook) {
-  //   stream_wait(compute_stream, launch_stream);
-  // }
-
   std::optional<EventHandle> event;
   if (async) {
-    // NOTES: we must ensure the all tensors will not be deallocated before the
-    // stream-wait happens, so in Python API, we must wrap all tensors into the
-    // event handle.
     event = EventHandle(launch_stream);
   } 
-  // // stream_wait(launch_stream, compute_stream);
-  // if (rank >= e_start_rank && rank < e_start_rank + e_num_ranks) {
-  //   stream_wait(compute_stream, launch_stream);
-  // }
-  // Receiver callback
   std::optional<std::function<EventHandle()>> recv_hook = std::nullopt;
   if (return_recv_hook) recv_hook = [=]() { 
-    // stream_wait(launch_stream, compute_stream);
     launcher(LOW_LATENCY_RECV_PHASE); 
-    // stream_wait(compute_stream, launch_stream);
-    // stream_wait(launch_stream, compute_stream);
-    // if (rank >= a_start_rank && rank < a_start_rank + a_num_ranks) {
-    //   stream_wait(compute_stream, launch_stream);
-    // }
     return EventHandle(launch_stream);};
 
   // Return values
