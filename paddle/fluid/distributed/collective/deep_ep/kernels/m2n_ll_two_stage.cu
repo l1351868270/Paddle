@@ -954,7 +954,7 @@ __global__ __launch_bounds__(
   const size_t hidden_bf16_int4 = kHidden / kNumElemsPerInt4;
   if (sm_id == 0 && thread_id == 0) {
     EP_DEVICE_ASSERT(ibgda_get_state()->num_rc_per_pe >= kNumQPs);
-    // EP_DEVICE_ASSERT(num_threads >= hidden_bf16_int4); // TODO: lzy why
+    EP_DEVICE_ASSERT(num_threads >= hidden_bf16_int4);
   }
 
   constexpr size_t num_bytes_per_slot = kHidden * sizeof(nv_bfloat16);
