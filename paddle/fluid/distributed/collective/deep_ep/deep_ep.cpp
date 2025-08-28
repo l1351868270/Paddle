@@ -161,7 +161,6 @@ Buffer::Buffer(int rank,
 Buffer::~Buffer() noexcept(false) {
   // Synchronize
   CUDA_CHECK(cudaDeviceSynchronize());
-  printf("Buffer::~Buffer begin!!!\n");
   if (num_nvl_bytes > 0) {
     // Barrier
     intranode::barrier(
