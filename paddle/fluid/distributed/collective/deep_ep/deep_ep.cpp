@@ -2292,13 +2292,6 @@ Buffer::m2n_low_latency_dispatch_two_stage(
   auto dispatch_rdma_recv_complete = buffer.dispatch_rdma_recv_complete_buffer + m2n_ll_dispatch_recv_complete_idx * num_ranks;
   m2n_ll_dispatch_recv_complete_idx = (m2n_ll_dispatch_recv_complete_idx + 1) % M2N_NUM_MAX_MICRO_BATCHES;
 
-  // Wait previous tasks to be finished
-  // NOTES: the hook mode will always use the default stream
-  // auto compute_stream = calc_ctx->stream();
-  // auto launch_stream = return_recv_hook ? compute_stream : comm_stream;
-  // EP_HOST_ASSERT(!(async && return_recv_hook));
-  // if (!return_recv_hook) stream_wait(launch_stream, compute_stream);
-
   auto compute_stream = calc_ctx->stream();
   auto launch_stream = comm_stream;
   if (rank >= a_start_rank && rank < a_start_rank + a_num_ranks) {
