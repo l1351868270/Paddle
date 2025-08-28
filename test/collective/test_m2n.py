@@ -202,7 +202,7 @@ def test_main(
                         print(f"{i} dispatch send wait attention {a2e_mb_idx_pre}_{a2e_layer_idx_pre} data end", flush=True)
                     
                 # attn 每一个micro batch均发送数据
-                a2e_send_result[a2e_mb_idx] = buffer.a2e_isend_two_stage_v3(
+                a2e_send_result[a2e_mb_idx] = buffer.a2e_isend_two_stage(
                     x,
                     topk_idx,
                     topk_weights,
@@ -232,7 +232,7 @@ def test_main(
                 # attn 最后一层不在接收数据
                 if e2a_layer_idx_next >=  moe_layer_start_index and e2a_layer_idx_next < num_hidden_layers - 1:
                     _, handle, _, _ = a2e_send_result[e2a_mb_idx_next]
-                    e2a_recv_result[e2a_mb_idx_next] = buffer.e2a_irecv_two_stage_v3(
+                    e2a_recv_result[e2a_mb_idx_next] = buffer.e2a_irecv_two_stage(
                         topk_idx,
                         topk_weights,
                         handle,
@@ -271,7 +271,7 @@ def test_main(
                 break
             # loop
             # moe 第一次启动接收数据
-            a2e_recv_result[0] = buffer.a2e_irecv_two_stage_v3(
+            a2e_recv_result[0] = buffer.a2e_irecv_two_stage(
                 hidden,
                 num_topk,
                 num_max_tokens,
@@ -314,7 +314,7 @@ def test_main(
                     print(f"{i} dispatch recv wait attention {a2e_mb_idx}_{a2e_layer_idx} data end", flush=True)
                 # moe 最后一个micro batch不再启动接收下一个数据
                 if idx < num_hidden_layers * num_micro_batches - 1:
-                    a2e_recv_result_tmp = buffer.a2e_irecv_two_stage_v3(
+                    a2e_recv_result_tmp = buffer.a2e_irecv_two_stage(
                         hidden,
                         num_topk,
                         num_max_tokens,
@@ -348,7 +348,7 @@ def test_main(
                         ).view(packed_recv_x[0].shape)
                     else:
                         simulated_gemm_x = packed_recv_x
-                    e2a_send_result[e2a_mb_idx_pre] = buffer.e2a_isend_two_stage_v3(
+                    e2a_send_result[e2a_mb_idx_pre] = buffer.e2a_isend_two_stage(
                         simulated_gemm_x, 
                         num_topk,
                         handle,
